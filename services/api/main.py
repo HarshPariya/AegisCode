@@ -136,6 +136,22 @@ async def auth_exception_handler(request: Request, exc: AuthError):
 
 
 # Health & Readiness Probes
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint returning API status, documentation links, and platform information."""
+    return {
+        "service": "AegisCode Enterprise Engine API",
+        "status": "online",
+        "version": "0.1.0",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+        "health_check": "/health",
+        "ready_check": "/ready",
+        "frontend": settings.FRONTEND_URL,
+        "message": "AegisCode Backend API is fully operational. To access the web user interface, deploy and open your Vercel frontend, or explore interactive API docs at /docs."
+    }
+
+
 @app.get("/health", tags=["Health"])
 async def health():
     """Liveness probe confirming the API process is alive, with optional DB check."""
