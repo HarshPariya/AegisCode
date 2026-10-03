@@ -10,10 +10,12 @@ import { api, setToken, getToken, setCachedUser } from "@/lib/api";
 /* ─── Backend health check ─────────────────────────────────── */
 async function checkBackend(): Promise<boolean> {
   try {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/health`,
-      { method: "GET", signal: AbortSignal.timeout(4000) }
-    );
+    const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const cleanUrl = rawUrl.replace(/\/+$/, "");
+    const res = await fetch(`${cleanUrl}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(10000),
+    });
     return res.ok;
   } catch {
     return false;
@@ -143,19 +145,17 @@ function LoginForm() {
 
     if (!googleClientId) {
       setError(
-        "Google Sign-In is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to apps/web/.env.local, or use email/password below."
+        "Google Sign-In is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to Vercel environment variables, or use email/password below."
       );
       return;
     }
 
-    if (!backendOnline) {
-      setError("Backend is offline. Please start: python -m uvicorn services.api.main:app --reload --port 8000");
-      return;
-    }
-
     if (!tokenClientRef.current) {
-      setError("Google Sign-In is loading… Please wait a moment and try again.");
-      return;
+      initGoogleAuth();
+      if (!tokenClientRef.current) {
+        setError("Google Sign-In is loading or blocked by your browser. Please allow popups and try again.");
+        return;
+      }
     }
 
     try {
@@ -172,11 +172,6 @@ function LoginForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-
-    if (!backendOnline) {
-      setError("Backend is offline. Please start: python -m uvicorn services.api.main:app --reload --port 8000");
-      return;
-    }
 
     setLoading(true);
     try {
@@ -259,8 +254,8 @@ function LoginForm() {
           <div className="mb-4 rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3 flex items-start gap-2.5">
             <AlertTriangle className="h-4 w-4 text-accent-amber shrink-0 mt-0.5" />
             <div className="text-xs text-amber-300">
-              <p className="font-semibold">Backend offline</p>
-              <p className="mt-0.5 font-mono opacity-80">python -m uvicorn services.api.main:app --reload --port 8000</p>
+              <p className="font-semibold">Backend server warming up</p>
+              <p className="mt-0.5 opacity-80">Render free tier instances sleep after inactivity and take ~30-50s to wake up on first load.</p>
             </div>
           </div>
         )}
