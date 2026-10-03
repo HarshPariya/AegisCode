@@ -1,4 +1,5 @@
 """User, Organization, and Membership repositories."""
+from __future__ import annotations
 from typing import Optional
 from database.models.user import User, Organization, Membership
 from database.repositories.base import BaseRepository

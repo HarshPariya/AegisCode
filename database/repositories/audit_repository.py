@@ -1,4 +1,5 @@
 """Audit log model and repository."""
+from __future__ import annotations
 from typing import Optional
 from database.models.base import MongoBaseModel
 from database.repositories.base import BaseRepository

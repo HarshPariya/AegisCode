@@ -1,4 +1,5 @@
 """Generic base repository using Motor (async MongoDB)."""
+from __future__ import annotations
 from typing import Generic, Optional, Type, TypeVar
 from database.connection import get_database
 from database.models.base import MongoBaseModel, utc_now

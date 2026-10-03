@@ -1,4 +1,5 @@
 """Repository and GitHubInstallation repositories."""
+from __future__ import annotations
 from typing import Optional
 import uuid
 from database.models.base import utc_now
