@@ -1,0 +1,18 @@
+{
+  "name": "aegiscode-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File ./run_web.ps1",
+    "dev:api": "powershell -ExecutionPolicy Bypass -File ./run_api.ps1",
+    "dev:both": "powershell -ExecutionPolicy Bypass -Command \"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -File ./run_api.ps1'; Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -File ./run_web.ps1'\"",
+    "build": "cd apps/web && npm run build",
+    "lint": "cd apps/web && npm run lint",
+    "test": "cd apps/web && npm run lint",
+    "test:backend": "pytest tests/ -v",
+    "install:web": "cd apps/web && npm install"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

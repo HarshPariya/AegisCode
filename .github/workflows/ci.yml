@@ -1,0 +1,93 @@
+name: AegisCode CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - development
+  pull_request:
+    branches:
+      - main
+      - development
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------
+  # Job 1: Backend Lint & Unit Tests
+  # -------------------------------------------------------------
+  backend-ci:
+    name: Backend Lint & Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: test
+      SECRET_KEY: ci-test-secret-key-at-least-32-chars-long-protection
+      MONGODB_URI: mongodb://localhost:27017/
+      MONGODB_DATABASE: aegiscode_test
+      MODEL_PROVIDER: groq
+      MODEL_API_KEY: mock_api_key_for_unit_tests
+      MODEL_NAME: openai/gpt-oss-120b
+      SANDBOX_PROVIDER: local_process
+      REQUIRE_APPROVAL_FOR_COMMITS: false
+      REQUIRE_APPROVAL_FOR_PULL_REQUESTS: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run code quality check (Ruff)
+        run: |
+          ruff check services/ packages/ orchestration/ sandbox/ database/ mcp/ a2a/
+
+      - name: Run backend unit test suite
+        run: |
+          python -m pytest tests/unit/ -v
+
+  # -------------------------------------------------------------
+  # Job 2: Frontend Typecheck & Production Build
+  # -------------------------------------------------------------
+  frontend-ci:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    env:
+      NEXT_PUBLIC_API_URL: https://aegiscode-api.onrender.com
+      NEXT_PUBLIC_APP_NAME: AegisCode
+      NEXT_PUBLIC_APP_VERSION: 0.1.0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Build Next.js application
+        run: npm run build

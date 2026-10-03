@@ -1,0 +1,163 @@
+# ==============================================================================
+# AegisCode — Render.com Deployment Configuration
+# ==============================================================================
+# Deploy: Connect this repo to Render and it will auto-detect this file.
+# Docs: https://render.com/docs/render-yaml-spec
+# ==============================================================================
+
+services:
+  # ============================================================
+  # 1. FastAPI Backend (API + Worker combined on Render Web Service)
+  # ============================================================
+  - type: web
+    name: aegiscode-api
+    runtime: python
+    region: oregon
+    plan: starter # Upgrade to standard/pro for production load
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn services.api.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: BACKEND_URL
+        fromService:
+          name: aegiscode-api
+          type: web
+          property: host
+      - key: FRONTEND_URL
+        value: https://aegiscode.vercel.app # Update with actual Vercel URL
+      - key: SECRET_KEY
+        generateValue: true # Render auto-generates a secure secret
+      - key: MONGODB_URI
+        sync: false # Set in Render dashboard (never commit)
+      - key: MONGODB_DATABASE
+        value: aegiscode
+      # LLM Primary
+      - key: MODEL_PROVIDER
+        value: groq
+      - key: MODEL_NAME
+        value: llama-3.3-70b-versatile
+      - key: MODEL_API_KEY
+        sync: false # Set in Render dashboard
+      - key: MODEL_TEMPERATURE
+        value: "0.0"
+      - key: MODEL_MAX_TOKENS
+        value: "4096"
+      - key: MODEL_TIMEOUT_SECONDS
+        value: "60"
+      - key: MODEL_MAX_RETRIES
+        value: "3"
+      - key: MODEL_RETRY_DELAY_SECONDS
+        value: "2.0"
+      - key: MODEL_MAX_TOKENS_PER_TASK
+        value: "100000"
+      # LLM Fallback (optional — set in dashboard)
+      # - key: MODEL_FALLBACK_PROVIDER
+      #   value: gemini
+      # - key: MODEL_FALLBACK_API_KEY
+      #   sync: false
+      # Sandbox: E2B cloud sandbox (production)
+      - key: SANDBOX_PROVIDER
+        value: e2b
+      - key: E2B_API_KEY
+        sync: false # Set in Render dashboard — get from https://e2b.dev
+      - key: E2B_TEMPLATE
+        value: base
+      - key: SANDBOX_TIMEOUT_SECONDS
+        value: "300"
+      - key: SANDBOX_ALLOW_INTERNET
+        value: "false"
+      # GitHub App
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_SLUG
+        value: aegiscode
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: GITHUB_PRIVATE_KEY
+        sync: false
+      # Google OAuth
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Policy
+      - key: REQUIRE_APPROVAL_FOR_COMMITS
+        value: "false"
+      - key: REQUIRE_APPROVAL_FOR_PULL_REQUESTS
+        value: "false"
+      - key: MAX_REPAIR_ATTEMPTS
+        value: "3"
+
+  # ============================================================
+  # 2. Durable Background Worker (long-running agent task execution)
+  # ============================================================
+  - type: worker
+    name: aegiscode-worker
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m services.worker.main
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: aegiscode
+      - key: MODEL_PROVIDER
+        value: groq
+      - key: MODEL_NAME
+        value: llama-3.3-70b-versatile
+      - key: MODEL_API_KEY
+        sync: false
+      - key: MODEL_TEMPERATURE
+        value: "0.0"
+      - key: MODEL_MAX_TOKENS
+        value: "4096"
+      - key: MODEL_TIMEOUT_SECONDS
+        value: "60"
+      - key: MODEL_MAX_RETRIES
+        value: "3"
+      - key: MODEL_RETRY_DELAY_SECONDS
+        value: "2.0"
+      - key: MODEL_MAX_TOKENS_PER_TASK
+        value: "100000"
+      - key: SANDBOX_PROVIDER
+        value: e2b
+      - key: E2B_API_KEY
+        sync: false
+      - key: E2B_TEMPLATE
+        value: base
+      - key: SANDBOX_TIMEOUT_SECONDS
+        value: "300"
+      - key: SANDBOX_ALLOW_INTERNET
+        value: "false"
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_SLUG
+        value: aegiscode
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: GITHUB_PRIVATE_KEY
+        sync: false
+      - key: REQUIRE_APPROVAL_FOR_COMMITS
+        value: "false"
+      - key: REQUIRE_APPROVAL_FOR_PULL_REQUESTS
+        value: "false"
+      - key: MAX_REPAIR_ATTEMPTS
+        value: "3"
