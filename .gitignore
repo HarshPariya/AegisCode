@@ -17,6 +17,7 @@ pnpm-debug.log*
 out/
 build/
 dist/
+*.tsbuildinfo
 
 # Python & testing
 __pycache__/
@@ -34,8 +35,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -43,6 +42,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+!apps/web/src/lib/
 .pytest_cache/
 .ruff_cache/
 .coverage

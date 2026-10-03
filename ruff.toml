@@ -1,0 +1,13 @@
+# AegisCode Ruff Configuration
+target-version = "py312"
+line-length = 120
+
+[lint]
+# Select core correctness and error checks
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line length handled flexibly
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]

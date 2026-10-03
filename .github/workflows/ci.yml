@@ -51,7 +51,7 @@ jobs:
 
       - name: Run code quality check (Ruff)
         run: |
-          ruff check services/ packages/ orchestration/ sandbox/ database/ mcp/ a2a/
+          ruff check --config ruff.toml services/ packages/ orchestration/ sandbox/ database/ mcp/ a2a/
 
       - name: Run backend unit test suite
         run: |
@@ -76,10 +76,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
           cache-dependency-path: apps/web/package-lock.json
 
