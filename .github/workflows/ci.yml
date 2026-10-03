@@ -22,6 +22,17 @@ jobs:
   backend-ci:
     name: Backend Lint & Unit Tests
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd mongosh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       ENVIRONMENT: test
       SECRET_KEY: ci-test-secret-key-at-least-32-chars-long-protection
