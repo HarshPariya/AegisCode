@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { BarChart3, TrendingUp, CheckCircle, Zap, DollarSign, Layers, AlertCircle } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 export default function EvaluationsPage() {
-  const [metrics, setMetrics] = useState<any>(null);
-  const [cards, setCards] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [metrics, setMetrics] = useState<any>(() => getCachedApiData("/api/metrics"));
+  const [cards, setCards] = useState<any[]>(() => getCachedApiData("/api/a2a/cards") || []);
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/metrics"));
 
   useEffect(() => {
     Promise.all([

@@ -17,17 +17,17 @@ import {
   X,
   GitBranch
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 import { ClientPortal } from "@/components/ClientPortal";
 
 export default function TasksPage() {
   const router = useRouter();
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [repos, setRepos] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<any[]>(() => getCachedApiData("/api/tasks") || []);
+  const [repos, setRepos] = useState<any[]>(() => getCachedApiData("/api/repositories") || []);
   const [filter, setFilter] = useState<string>("ALL");
   const [search, setSearch] = useState<string>("");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/tasks"));
 
   // New task form state
   const [selectedRepo, setSelectedRepo] = useState("");
@@ -38,19 +38,19 @@ export default function TasksPage() {
   const [executionPolicy, setExecutionPolicy] = useState("standard");
   const [creating, setCreating] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent && !hasCachedApiData("/api/tasks")) {
+      setLoading(true);
+    }
     try {
       const [tList, rList] = await Promise.all([
         api.tasks.list().catch(() => []),
-        // Use workspace-scoped repositories (not raw GitHub API)
-        // This ensures only repos authorized for this workspace appear
         api.repositories.list().catch(() => []),
       ]);
       setTasks(tList);
       setRepos(rList);
       if (rList.length > 0) {
-        setSelectedRepo(rList[0].id || rList[0].name);
+        setSelectedRepo((prev) => prev || rList[0].id || rList[0].name);
       }
       return { tList, rList };
     } finally {
@@ -59,7 +59,7 @@ export default function TasksPage() {
   };
 
   useEffect(() => {
-    loadData().then((res) => {
+    loadData(hasCachedApiData("/api/tasks")).then((res) => {
       if (typeof window !== "undefined" && res) {
         const params = new URLSearchParams(window.location.search);
         const repoParam = params.get("repo");

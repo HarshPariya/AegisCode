@@ -1,8 +1,76 @@
 /**
- * AegisCode Typed API Client
+ * Dynamic API Base URL resolution:
+ * 1. User-customized URL in localStorage (if set)
+ * 2. NEXT_PUBLIC_API_URL environment variable
+ * 3. In browser on HTTPS: fallback to deployed cloud URL to avoid Mixed Content error
+ * 4. Local development fallback: http://localhost:8000
  */
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const custom = localStorage.getItem("aegis_api_url");
+    if (custom && custom.trim()) {
+      return custom.trim().replace(/\/+$/, "");
+    }
+  }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, "");
+  }
+
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    return "https://aegiscode-api.onrender.com";
+  }
+
+  return "http://localhost:8000";
+}
+
+export function setApiBaseUrl(url: string) {
+  if (typeof window !== "undefined") {
+    if (url && url.trim()) {
+      localStorage.setItem("aegis_api_url", url.trim().replace(/\/+$/, ""));
+    } else {
+      localStorage.removeItem("aegis_api_url");
+    }
+  }
+}
+
+// In-memory fast cache for instant page switches (0ms latency)
+const memoryCache = new Map<string, { data: any; timestamp: number }>();
+
+export function getCachedApiData<T>(endpoint: string, maxAgeMs = 120000): T | null {
+  const item = memoryCache.get(endpoint);
+  if (item && Date.now() - item.timestamp < maxAgeMs) {
+    return item.data as T;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const stored = sessionStorage.getItem(`aegis_cache_${endpoint}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Date.now() - parsed.timestamp < maxAgeMs) {
+          memoryCache.set(endpoint, parsed);
+          return parsed.data as T;
+        }
+      }
+    } catch { }
+  }
+  return null;
+}
+
+export function setCachedApiData(endpoint: string, data: any) {
+  const item = { data, timestamp: Date.now() };
+  memoryCache.set(endpoint, item);
+  if (typeof window !== "undefined") {
+    try {
+      sessionStorage.setItem(`aegis_cache_${endpoint}`, JSON.stringify(item));
+    } catch { }
+  }
+}
+
+export function hasCachedApiData(endpoint: string, maxAgeMs = 120000): boolean {
+  return getCachedApiData(endpoint, maxAgeMs) !== null;
+}
 
 export interface UserProfile {
   id?: string;
@@ -52,6 +120,7 @@ export function clearToken() {
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const apiBase = getApiBaseUrl();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> || {}),
@@ -61,9 +130,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  const method = (options.method || "GET").toUpperCase();
+
+  // Create an automatic 6-second timeout signal for all requests so UI never hangs indefinitely
+  let timeoutSignal: AbortSignal | undefined;
+  if (!options.signal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    try {
+      timeoutSignal = AbortSignal.timeout(6000);
+    } catch { }
+  }
+
   try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
+    const res = await fetch(`${apiBase}${endpoint}`, {
       ...options,
+      signal: options.signal || timeoutSignal,
       headers,
     });
 
@@ -84,50 +164,59 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       throw new Error(errMsg);
     }
 
-    return res.json() as Promise<T>;
-  } catch (err: any) {
-    const isNetworkError = err.name === "TypeError" || err.message?.includes("fetch");
-    if (isNetworkError) {
-      console.warn(`[AegisCode API] Backend server unreachable at ${API_BASE}${endpoint}. Ensure 'python -m uvicorn services.api.main:app --reload --port 8000' is running.`);
-      // Return safe empty fallback for query endpoints
-      const method = options.method || "GET";
-      if (method === "GET") {
-        if (
-          endpoint.includes("/approvals") ||
-          endpoint.includes("/tasks") ||
-          endpoint.includes("/repositories") ||
-          endpoint.includes("/pull-requests") ||
-          endpoint.includes("/agents") ||
-          endpoint.includes("/cards") ||
-          endpoint.includes("/activity") ||
-          endpoint.includes("/history") ||
-          endpoint.includes("/workspaces")
-        ) {
-          return [] as unknown as T;
-        }
-        if (endpoint.includes("/metrics")) {
-          return {
-            total_tasks: 0,
-            completed_tasks: 0,
-            failed_tasks: 0,
-            active_tasks: 0,
-            success_rate: 0,
-            average_duration_seconds: 0,
-            average_repair_loops: 0.0,
-            tokens_consumed: 0,
-            estimated_cost_usd: 0.0,
-            data_available: false,
-          } as unknown as T;
-        }
-        if (endpoint.includes("/me")) {
-          return null as unknown as T;
-        }
-        if (endpoint.includes("/status")) {
-          return { app_configured: false, connected: false, installations: [], repository_count: 0 } as unknown as T;
-        }
-      }
-      throw new Error("Cannot connect to AegisCode backend API on port 8000. Please start the backend with 'python -m uvicorn services.api.main:app --reload --port 8000'.");
+    const data = (await res.json()) as T;
+    // Cache successful GET queries for instant client navigation
+    if (method === "GET") {
+      setCachedApiData(endpoint, data);
     }
+    return data;
+  } catch (err: any) {
+    // If it's a GET query, check cache first
+    if (method === "GET") {
+      const cached = getCachedApiData<T>(endpoint);
+      if (cached !== null) {
+        return cached;
+      }
+
+      // Safe fallback for query endpoints so UI never freezes or displays infinite skeletons
+      if (
+        endpoint.includes("/approvals") ||
+        endpoint.includes("/tasks") ||
+        endpoint.includes("/repositories") ||
+        endpoint.includes("/pull-requests") ||
+        endpoint.includes("/agents") ||
+        endpoint.includes("/cards") ||
+        endpoint.includes("/activity") ||
+        endpoint.includes("/history") ||
+        endpoint.includes("/workspaces")
+      ) {
+        return [] as unknown as T;
+      }
+      if (endpoint.includes("/metrics")) {
+        return {
+          total_tasks: 0,
+          completed_tasks: 0,
+          failed_tasks: 0,
+          active_tasks: 0,
+          success_rate: 0,
+          average_duration_seconds: 0,
+          average_repair_loops: 0.0,
+          tokens_consumed: 0,
+          estimated_cost_usd: 0.0,
+          data_available: false,
+        } as unknown as T;
+      }
+      if (endpoint.includes("/me")) {
+        const cachedUser = getCachedUser();
+        return cachedUser as unknown as T;
+      }
+      if (endpoint.includes("/status")) {
+        return { app_configured: false, connected: false, installations: [], repository_count: 0 } as unknown as T;
+      }
+    }
+
+    // For write mutations, bubble the error with a friendly message
+    console.warn(`[AegisCode API] Request error at ${apiBase}${endpoint}:`, err?.message || err);
     throw err;
   }
 }

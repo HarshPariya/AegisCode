@@ -24,7 +24,7 @@ import {
   ArrowRight,
   User as UserIcon,
 } from "lucide-react";
-import { api, getToken, clearToken, getCachedUser, UserProfile } from "@/lib/api";
+import { api, getToken, clearToken, getCachedUser, UserProfile, getApiBaseUrl } from "@/lib/api";
 
 // Google multicolor SVG icon
 function GoogleIcon({ className }: { className?: string }) {
@@ -95,25 +95,50 @@ export function Navigation() {
 
   useEffect(() => {
     setMounted(true);
+    setIsMobileMenuOpen(false);
+    setIsProfileOpen(false);
+
     const token = getToken();
     if (token) {
       const cached = getCachedUser();
       if (cached) setUser(cached);
+    } else {
+      setUser(null);
+    }
+  }, [pathname]);
+
+  // Background health check & approvals polling
+  useEffect(() => {
+    const checkEngine = () => {
+      const apiBase = getApiBaseUrl();
+      fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(3500) })
+        .then((r) => setDbHealthy(r.ok))
+        .catch(() => setDbHealthy(false));
+    };
+
+    checkEngine();
+    const engineInterval = setInterval(checkEngine, 25000);
+
+    const token = getToken();
+    let approvalsInterval: any;
+    if (token) {
       api.auth.me().then((fresh) => { if (fresh) setUser(fresh); }).catch(() => { });
       const refreshApprovals = () => {
         api.approvals.list().then((apps) => {
-          setPendingApprovals(apps.filter((a) => (a.status || "").toLowerCase() === "pending").length);
+          if (Array.isArray(apps)) {
+            setPendingApprovals(apps.filter((a) => (a.status || "").toLowerCase() === "pending").length);
+          }
         }).catch(() => { });
       };
       refreshApprovals();
-      const interval = setInterval(refreshApprovals, 10000);
-      return () => clearInterval(interval);
+      approvalsInterval = setInterval(refreshApprovals, 15000);
     }
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/health`)
-      .then((r) => setDbHealthy(r.ok)).catch(() => setDbHealthy(false));
-    setIsMobileMenuOpen(false);
-    setIsProfileOpen(false);
-  }, [pathname]);
+
+    return () => {
+      clearInterval(engineInterval);
+      if (approvalsInterval) clearInterval(approvalsInterval);
+    };
+  }, []);
 
   const handleLogout = () => {
     clearToken();

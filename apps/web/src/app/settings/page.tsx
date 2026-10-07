@@ -24,7 +24,7 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
-import { api, getCachedUser, UserProfile } from "@/lib/api";
+import { api, getCachedUser, UserProfile, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -53,9 +53,9 @@ type Tab = "profile" | "github" | "policy" | "usage" | "security" | "workspace";
 
 export default function SettingsPage() {
   const [user, setUser] = useState<UserProfile | null>(() => getCachedUser());
-  const [githubStatus, setGithubStatus] = useState<any>(null);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [githubStatus, setGithubStatus] = useState<any>(() => getCachedApiData("/api/github/status"));
+  const [metrics, setMetrics] = useState<any>(() => getCachedApiData("/api/metrics"));
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/github/status"));
   const [activeTab, setActiveTab] = useState<Tab>("profile");
   const [disconnecting, setDisconnecting] = useState(false);
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
@@ -71,8 +71,10 @@ export default function SettingsPage() {
   const [syncingRepos, setSyncingRepos] = useState(false);
   const [showConnectOptions, setShowConnectOptions] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent && !hasCachedApiData("/api/github/status")) {
+      setLoading(true);
+    }
     try {
       const [u, g, m] = await Promise.all([
         api.auth.me().catch(() => null),
@@ -88,7 +90,7 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(hasCachedApiData("/api/github/status"));
   }, []);
 
   const handleDisconnectGitHub = async (instId: number) => {

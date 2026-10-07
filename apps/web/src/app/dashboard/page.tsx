@@ -18,7 +18,7 @@ import {
   Building2,
   CheckCircle2,
 } from "lucide-react";
-import { api, getCachedUser, UserProfile } from "@/lib/api";
+import { api, getCachedUser, UserProfile, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 function DashboardUserAvatar({ user }: { user: UserProfile }) {
   const [hasError, setHasError] = useState(false);
@@ -53,14 +53,16 @@ function DashboardUserAvatar({ user }: { user: UserProfile }) {
 
 export default function DashboardPage() {
   const [user, setUser] = useState<UserProfile | null>(() => getCachedUser());
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [approvals, setApprovals] = useState<any[]>([]);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [githubStatus, setGithubStatus] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [tasks, setTasks] = useState<any[]>(() => getCachedApiData("/api/tasks") || []);
+  const [approvals, setApprovals] = useState<any[]>(() => getCachedApiData("/api/approvals") || []);
+  const [metrics, setMetrics] = useState<any>(() => getCachedApiData("/api/metrics"));
+  const [githubStatus, setGithubStatus] = useState<any>(() => getCachedApiData("/api/github/status"));
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/tasks"));
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent && !hasCachedApiData("/api/tasks")) {
+      setLoading(true);
+    }
     try {
       const cached = getCachedUser();
       if (cached) setUser(cached);
@@ -85,10 +87,10 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(hasCachedApiData("/api/tasks"));
     const interval = setInterval(() => {
-      loadData();
-    }, 10000);
+      loadData(true);
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -137,7 +139,7 @@ export default function DashboardPage() {
 
             <div className="flex items-center gap-3">
               <button
-                onClick={loadData}
+                onClick={() => loadData(false)}
                 title="Sync from Database"
                 className="flex items-center gap-1.5 rounded-lg border border-surfaceBorder bg-surface px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white hover:bg-surface/80 transition-colors"
               >

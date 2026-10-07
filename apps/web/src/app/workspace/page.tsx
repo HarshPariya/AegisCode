@@ -15,17 +15,22 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { api, getCachedUser, UserProfile } from "@/lib/api";
+import { api, getCachedUser, UserProfile, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 export default function WorkspacePage() {
   const [user, setUser] = useState<UserProfile | null>(() => getCachedUser());
-  const [workspace, setWorkspace] = useState<any>(null);
-  const [githubStatus, setGithubStatus] = useState<any>(null);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [workspace, setWorkspace] = useState<any>(() => {
+    const list = getCachedApiData<any[]>("/api/workspaces");
+    return list && list.length > 0 ? list[0] : null;
+  });
+  const [githubStatus, setGithubStatus] = useState<any>(() => getCachedApiData("/api/github/status"));
+  const [metrics, setMetrics] = useState<any>(() => getCachedApiData("/api/metrics"));
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/workspaces") && !hasCachedApiData("/api/github/status"));
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent && !hasCachedApiData("/api/workspaces")) {
+      setLoading(true);
+    }
     try {
       const [me, wsList, ghStatus, mData] = await Promise.all([
         api.auth.me().catch(() => null),
@@ -43,7 +48,7 @@ export default function WorkspacePage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(hasCachedApiData("/api/workspaces"));
   }, []);
 
   const wsName = workspace?.name || `${user?.username || "Your"}'s Workspace`;
@@ -63,7 +68,7 @@ export default function WorkspacePage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
-            onClick={loadData}
+            onClick={() => loadData(false)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg border border-surfaceBorder bg-surface px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors"
           >

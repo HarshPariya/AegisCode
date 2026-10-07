@@ -76,21 +76,19 @@ app = FastAPI(
 
 settings = get_settings()
 
-# Allowed CORS origins
-if settings.is_production:
-    allowed_origins = [settings.FRONTEND_URL.rstrip("/")]
-else:
-    allowed_origins = [
-        settings.FRONTEND_URL.rstrip("/"),
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-    ]
+# Allowed CORS origins — support localhost and all production/preview cloud deployments
+allowed_origins = [
+    settings.FRONTEND_URL.rstrip("/"),
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "https://localhost:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -153,6 +151,7 @@ async def root():
 
 
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 async def health():
     """Liveness probe confirming the API process is alive, with optional DB check."""
     try:

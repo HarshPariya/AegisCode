@@ -22,7 +22,7 @@ import {
   ShieldAlert,
   RotateCcw,
 } from "lucide-react";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 const AGENT_STAGES = [
   { id: "PLANNING", label: "Planning", agent: "Supervisor", role: "supervisor" },
@@ -52,11 +52,11 @@ export default function TaskDetailPage({ params }: { params?: any }) {
   }
   const taskId = resolvedId;
 
-  const [task, setTask] = useState<any>(null);
+  const [task, setTask] = useState<any>(() => (taskId ? getCachedApiData(`/api/tasks/${taskId}`) : null));
   const [events, setEvents] = useState<any[]>([]);
   const [diff, setDiff] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "diff" | "tests" | "security" | "review">("timeline");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => (taskId ? !hasCachedApiData(`/api/tasks/${taskId}`) : true));
   const [actionLoading, setActionLoading] = useState(false);
 
   const loadTask = useCallback(async () => {

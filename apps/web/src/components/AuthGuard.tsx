@@ -7,7 +7,11 @@ import { getToken } from "@/lib/api";
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [authorized, setAuthorized] = useState(false);
+  const [authorized, setAuthorized] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    if (pathname === "/" || pathname === "/login") return true;
+    return !!getToken();
+  });
 
   useEffect(() => {
     const token = getToken();

@@ -30,7 +30,7 @@ import {
   Play,
   Clock,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 import { ClientPortal } from "@/components/ClientPortal";
 
 type ViewTab = "WORKFORCE" | "WORKFLOW" | "A2A";
@@ -203,16 +203,16 @@ const DEFAULT_AGENTS: AgentItem[] = [
 ];
 
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<AgentItem[]>(DEFAULT_AGENTS);
-  const [a2aCards, setA2aCards] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [agents, setAgents] = useState<AgentItem[]>(() => getCachedApiData("/api/agents") || DEFAULT_AGENTS);
+  const [a2aCards, setA2aCards] = useState<any[]>(() => getCachedApiData("/api/a2a/cards") || []);
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/agents"));
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<ViewTab>("WORKFORCE");
   const [selectedAgent, setSelectedAgent] = useState<AgentItem | null>(null);
 
   const loadData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
-    else setLoading(true);
+    else if (!hasCachedApiData("/api/agents")) setLoading(true);
 
     try {
       const [agentList, cards] = await Promise.all([
@@ -237,7 +237,7 @@ export default function AgentsPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(hasCachedApiData("/api/agents"));
   }, []);
 
   const openInspector = (agent: AgentItem) => {

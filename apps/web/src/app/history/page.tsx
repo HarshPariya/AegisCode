@@ -25,7 +25,7 @@ import {
   Sparkles,
   GitCommit,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 type StatusFilter = "ALL" | "COMPLETED" | "FAILED" | "CANCELLED" | "BLOCKED" | "WAITING_FOR_APPROVAL";
 
@@ -115,20 +115,20 @@ function HistoryContent() {
   const [activeTab, setActiveTab] = useState<"tasks" | "audit">(initialTab);
 
   // Task History State
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [loadingTasks, setLoadingTasks] = useState(true);
+  const [tasks, setTasks] = useState<any[]>(() => getCachedApiData("/api/history") || getCachedApiData("/api/tasks") || []);
+  const [loadingTasks, setLoadingTasks] = useState(() => !hasCachedApiData("/api/history") && !hasCachedApiData("/api/tasks"));
   const [taskSearch, setTaskSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
   // Audit Logs State
-  const [events, setEvents] = useState<any[]>([]);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [events, setEvents] = useState<any[]>(() => getCachedApiData("/api/audit-logs") || []);
+  const [loadingEvents, setLoadingEvents] = useState(() => !hasCachedApiData("/api/audit-logs"));
   const [auditSearch, setAuditSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
-    else {
+    else if (!hasCachedApiData("/api/history") && !hasCachedApiData("/api/tasks")) {
       setLoadingTasks(true);
       setLoadingEvents(true);
     }
@@ -152,7 +152,7 @@ function HistoryContent() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(hasCachedApiData("/api/history") || hasCachedApiData("/api/tasks"));
   }, []);
 
   // Filtered Tasks
@@ -222,8 +222,8 @@ function HistoryContent() {
         <button
           onClick={() => setActiveTab("tasks")}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === "tasks"
-              ? "bg-brand-500/15 text-brand-400 border border-brand-500/40 shadow-sm"
-              : "text-slate-400 hover:text-white hover:bg-surface/50 border border-transparent"
+            ? "bg-brand-500/15 text-brand-400 border border-brand-500/40 shadow-sm"
+            : "text-slate-400 hover:text-white hover:bg-surface/50 border border-transparent"
             }`}
         >
           <History className="h-4 w-4" />
@@ -233,8 +233,8 @@ function HistoryContent() {
         <button
           onClick={() => setActiveTab("audit")}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === "audit"
-              ? "bg-brand-500/15 text-brand-400 border border-brand-500/40 shadow-sm"
-              : "text-slate-400 hover:text-white hover:bg-surface/50 border border-transparent"
+            ? "bg-brand-500/15 text-brand-400 border border-brand-500/40 shadow-sm"
+            : "text-slate-400 hover:text-white hover:bg-surface/50 border border-transparent"
             }`}
         >
           <ShieldCheck className="h-4 w-4" />
@@ -267,8 +267,8 @@ function HistoryContent() {
                     key={filter}
                     onClick={() => setStatusFilter(filter)}
                     className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${statusFilter === filter
-                        ? "bg-brand-500 text-slate-950 font-bold shadow-sm"
-                        : "bg-surface border border-surfaceBorder text-slate-400 hover:text-white hover:bg-surface/80"
+                      ? "bg-brand-500 text-slate-950 font-bold shadow-sm"
+                      : "bg-surface border border-surfaceBorder text-slate-400 hover:text-white hover:bg-surface/80"
                       }`}
                   >
                     {filter === "ALL"
@@ -459,8 +459,8 @@ function HistoryContent() {
                         )}
                         {event.result && (
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${event.result === "SUCCESS"
-                              ? "bg-accent-emerald/10 text-accent-emerald border border-accent-emerald/30"
-                              : "bg-accent-rose/10 text-accent-rose border border-accent-rose/30"
+                            ? "bg-accent-emerald/10 text-accent-emerald border border-accent-emerald/30"
+                            : "bg-accent-rose/10 text-accent-rose border border-accent-rose/30"
                             }`}>
                             {event.result}
                           </span>

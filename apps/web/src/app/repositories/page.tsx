@@ -24,7 +24,7 @@ import {
   Link2,
   X,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 import { ClientPortal } from "@/components/ClientPortal";
 
 function GitHubIcon({ className = "h-5 w-5" }: { className?: string }) {
@@ -40,9 +40,9 @@ function GitHubIcon({ className = "h-5 w-5" }: { className?: string }) {
 }
 
 export default function RepositoriesPage() {
-  const [repos, setRepos] = useState<any[]>([]);
-  const [githubStatus, setGithubStatus] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [repos, setRepos] = useState<any[]>(() => getCachedApiData("/api/repositories") || []);
+  const [githubStatus, setGithubStatus] = useState<any>(() => getCachedApiData("/api/github/status"));
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/repositories"));
   const [syncing, setSyncing] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<number | null>(null);
   const [showDisconnectModal, setShowDisconnectModal] = useState<number | null>(null);
@@ -62,8 +62,10 @@ export default function RepositoriesPage() {
   const [linkIdentifier, setLinkIdentifier] = useState("");
   const [linkLoading, setLinkLoading] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent && !hasCachedApiData("/api/repositories")) {
+      setLoading(true);
+    }
     try {
       const [r, g] = await Promise.all([
         api.repositories.list().catch(() => []),
@@ -112,7 +114,7 @@ export default function RepositoriesPage() {
       setSyncMsg({ type: "success", text: "GitHub account connected! Repositories have been synchronized." });
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-    loadData();
+    loadData(hasCachedApiData("/api/repositories"));
   }, []);
 
   const handleSync = async () => {
@@ -718,10 +720,10 @@ export default function RepositoriesPage() {
               {syncMsg && (
                 <div
                   className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 ${syncMsg.type === "success"
-                      ? "border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald"
-                      : syncMsg.type === "error"
-                        ? "border-accent-rose/30 bg-accent-rose/10 text-accent-rose"
-                        : "border-brand-500/30 bg-brand-500/10 text-brand-300"
+                    ? "border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald"
+                    : syncMsg.type === "error"
+                      ? "border-accent-rose/30 bg-accent-rose/10 text-accent-rose"
+                      : "border-brand-500/30 bg-brand-500/10 text-brand-300"
                     }`}
                 >
                   {syncMsg.type === "success" && <CheckCircle2 className="h-4 w-4 shrink-0" />}

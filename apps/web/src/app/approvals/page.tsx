@@ -25,7 +25,7 @@ import {
   Check,
   Plus,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 
 type StatusTab = "ALL" | "PENDING" | "APPROVED" | "REJECTED";
 type RiskFilter = "ALL" | "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
@@ -85,8 +85,8 @@ function formatTimeAgo(isoString: string): string {
 }
 
 export default function ApprovalsPage() {
-  const [approvals, setApprovals] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [approvals, setApprovals] = useState<any[]>(() => getCachedApiData("/api/approvals?status=all") || getCachedApiData("/api/approvals") || []);
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/approvals?status=all") && !hasCachedApiData("/api/approvals"));
   const [refreshing, setRefreshing] = useState(false);
   const [statusTab, setStatusTab] = useState<StatusTab>("PENDING");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("ALL");
@@ -98,7 +98,7 @@ export default function ApprovalsPage() {
 
   const fetchApprovals = async (isManual = false) => {
     if (isManual) setRefreshing(true);
-    else setLoading(true);
+    else if (!hasCachedApiData("/api/approvals?status=all")) setLoading(true);
 
     try {
       // Fetch all approvals so the client can filter and show exact tab badges
@@ -118,7 +118,7 @@ export default function ApprovalsPage() {
     const interval = setInterval(() => {
       api.approvals.list("all").then((data) => {
         if (Array.isArray(data)) setApprovals(data);
-      }).catch(() => {});
+      }).catch(() => { });
     }, 10000);
     return () => clearInterval(interval);
   }, []);

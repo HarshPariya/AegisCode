@@ -2,18 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { GitPullRequest, ExternalLink, GitBranch, Clock, AlertCircle, ArrowRight } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
 import Link from "next/link";
 
 export default function PullRequestsPage() {
-  const [prs, setPrs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [prs, setPrs] = useState<any[]>(() => getCachedApiData("/api/pull-requests") || []);
+  const [loading, setLoading] = useState(() => !hasCachedApiData("/api/pull-requests"));
   const [error, setError] = useState("");
 
   useEffect(() => {
     api.pullRequests.list()
-      .then(setPrs)
-      .catch((err) => setError(err.message || "Failed to load pull requests"))
+      .then((data) => {
+        if (Array.isArray(data)) setPrs(data);
+      })
+      .catch((err) => {
+        if (!hasCachedApiData("/api/pull-requests")) {
+          setError(err.message || "Failed to load pull requests");
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
