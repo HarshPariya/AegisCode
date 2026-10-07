@@ -15,12 +15,12 @@ class TestingAgent:
     async def run_tests(self, sandbox, workspace_id: str):
         """Run tests in the sandbox and return the results."""
         logger.info(f"TestingAgent: running tests in workspace {workspace_id}")
-        
+
         # Smart detection of project test runner
         files = await sandbox.list_files(workspace_id)
         has_pkg_json = any(f.endswith("package.json") or f == "package.json" for f in files)
         has_python = any(f.endswith((".py", "requirements.txt", "pyproject.toml")) for f in files)
-        
+
         test_cmd = "npm test" if has_pkg_json and not has_python else "pytest"
         res = await sandbox.execute_command(workspace_id, test_cmd)
 

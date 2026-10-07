@@ -81,7 +81,7 @@ class CodingAgent:
                     pass
                 updated = existing + f"\n# [AegisCode] {task_title}\n"
                 await sandbox.write_file(workspace_id, f, updated)
-                
+
             diff = await sandbox.collect_diff(workspace_id)
             if diff.files_changed > 0:
                 result.diff_summary = diff
@@ -114,7 +114,7 @@ class CodingAgent:
             "Authorization": f"Bearer {self.settings.MODEL_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         model_to_use = self.settings.MODEL_NAME
 
         max_steps = 10
@@ -189,7 +189,7 @@ class CodingAgent:
                             content = content.split("```json")[1].split("```")[0].strip()
                         elif "```" in content:
                             content = content.split("```")[1].split("```")[0].strip()
-                            
+
                         parsed = json.loads(content)
                         if isinstance(parsed, dict) and not parsed.get("diff_summary"):
                             parsed["diff_summary"] = DiffSummary().model_dump()

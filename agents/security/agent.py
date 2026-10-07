@@ -1,6 +1,6 @@
 """Security Agent — secret scanning, prompt injection defense, AST audit."""
 from packages.shared.logging import get_logger
-from packages.contracts.models import SecurityResult, SecurityFinding
+from packages.contracts.models import SecurityResult
 from packages.shared.constants import RiskLevel
 
 logger = get_logger("aegiscode.agents.security")

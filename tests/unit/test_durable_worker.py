@@ -1,5 +1,4 @@
 """Unit tests for DurableWorker lease locking, claiming, and crash recovery."""
-import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
 import pytest

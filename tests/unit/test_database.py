@@ -1,8 +1,8 @@
 """Unit tests for MongoDB models, connection, and repositories."""
 import pytest
-from database.models import User, Organization, Task, AuditLog
+from database.models import User, Task
 from database.repositories import TaskRepository, UserRepository, AuditRepository
-from packages.shared.constants import TaskStatus, OrganizationRole
+from packages.shared.constants import TaskStatus
 from packages.shared.errors import AuthorizationError
 
 

@@ -10,10 +10,8 @@ Features:
 - Structured JSON output with Pydantic schema validation
 """
 import json
-import os
 import asyncio
-import time
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Dict, Optional, Type, TypeVar
 import httpx
 from pydantic import BaseModel
 from packages.config.settings import get_settings
@@ -360,7 +358,6 @@ class ModelGateway:
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{config.model_name}:generateContent?key={config.api_key}"
         )
-        schema_dict = response_schema.model_json_schema()
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": prompt}]}],
@@ -389,7 +386,6 @@ class ModelGateway:
         schema_name = response_schema.__name__
 
         if schema_name == "TaskPlan":
-            from packages.contracts.models import TaskPlan, PlanStep
             from packages.shared.constants import AgentRole
             return response_schema.model_validate({
                 "goal": "Implement requested changes and verify stability",
@@ -415,7 +411,6 @@ class ModelGateway:
             })
 
         elif schema_name == "CodingResult":
-            from packages.contracts.models import DiffSummary, FileDiff
             patch_content = (
                 "--- a/services/auth.py\n"
                 "+++ b/services/auth.py\n"

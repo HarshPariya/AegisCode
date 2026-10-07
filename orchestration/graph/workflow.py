@@ -153,7 +153,6 @@ class AegisWorkflowRunner:
                 TaskStatus.TESTING.value, TaskStatus.SECURITY_REVIEW.value,
                 TaskStatus.CODE_REVIEW.value, TaskStatus.WAITING_FOR_APPROVAL.value
             )
-            skip_to_coding = current_task_status == TaskStatus.REPAIRING.value
 
             if not skip_to_github and not skip_to_security:
                 # 2. Planning Step — only if not resuming mid-pipeline
@@ -174,8 +173,6 @@ class AegisWorkflowRunner:
                 state.research = await self.researcher.investigate(state.title, state.description, self.sandbox, workspace_id)
 
                 # 4. Coding & Testing Bounded Repair Loop
-                # If resuming in REPAIRING state, skip straight to coding on first iteration
-                first_iter_is_repair = skip_to_coding
                 while state.repair_count <= state.max_repairs:
                     # Coding — transition from RESEARCHING, REPAIRING, or CODING (idempotent)
                     task = await self.state_mgr.transition_to(task, TaskStatus.CODING, actor="coder")
@@ -347,7 +344,7 @@ class AegisWorkflowRunner:
                     if is_git_res.exit_code != 0:
                         await self.sandbox.execute_command(workspace_id, "git init")
                         await self.sandbox.execute_command(workspace_id, "git add -A")
-                        await self.sandbox.execute_command(workspace_id, f'git commit -m "[AegisCode] Initial commit"')
+                        await self.sandbox.execute_command(workspace_id, 'git commit -m "[AegisCode] Initial commit"')
 
                     # Verify HEAD commit exists on current branch before creating task branch
                     head_check = await self.sandbox.execute_command(workspace_id, "git rev-parse HEAD")
