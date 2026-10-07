@@ -28,10 +28,11 @@ from packages.shared.logging import get_logger
 
 logger = get_logger("aegiscode.durable_worker")
 
-# Lease timeout — if no heartbeat for 60 seconds, task is considered orphaned
-LEASE_TIMEOUT_SECONDS = 60
-HEARTBEAT_INTERVAL_SECONDS = 10
-POLL_INTERVAL_SECONDS = 2
+# Lease timeout — if no heartbeat for 300 seconds, task is considered orphaned
+# (increased from 60s to allow long LLM calls during coding/testing)
+LEASE_TIMEOUT_SECONDS = 300
+HEARTBEAT_INTERVAL_SECONDS = 5
+POLL_INTERVAL_SECONDS = 3
 
 
 class DurableWorker:

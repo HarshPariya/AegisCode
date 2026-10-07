@@ -1,5 +1,6 @@
 """Coding Agent: Code modification, regression test implementation, and patch generation."""
 import json
+import asyncio
 import httpx
 from packages.contracts.models import CodingResult, ResearchResult, DiffSummary
 from integrations.llm.gateway import get_model_gateway
@@ -11,22 +12,24 @@ from packages.shared.logging import get_logger
 logger = get_logger("aegiscode.agent.coder")
 
 SYSTEM_PROMPT = """You are the Senior Coding Agent for AegisCode.
-Your objective is to modify source code to implement the requested task or fix the reported bug cleanly.
+Your objective is to examine source code, apply requested engineering modifications, or verify codebase integrity.
 
-You have access to tools via Model Context Protocol (MCP).
-Use `workspace.read_file` to investigate the code.
-Use `workspace.write_file` to apply changes.
-Use `terminal.run_tests` to verify your changes.
+You have access to tools via Model Context Protocol (MCP):
+- Use `workspace.list_files` to discover the file structure of the repository.
+- Use `workspace.read_file` to inspect code files.
+- Use `workspace.write_file` to apply modifications or write tests.
+- Use `terminal.execute_command` to inspect repository state, run linter, or run build tools.
+- Use `terminal.run_tests` to run tests and verify changes.
 
 Rules:
-1. Preserve existing project architecture and conventions.
+1. Preserve existing project architecture, styling, and conventions.
 2. Minimize unnecessary diff footprint.
-3. Include regression tests if applicable.
-4. When you have finished writing the code and verifying it, you MUST output your final summary as a valid JSON object matching this schema:
+3. If the task is an inquiry, audit, or verification task (e.g. 'check repo', 'audit tests', 'verify endpoints') and NO changes are required because the repository is already working properly, do NOT make unnecessary file modifications. Clearly explain in your summary that the codebase was analyzed, verified, and no changes were needed.
+4. When finished, output your final summary as a valid JSON object matching this schema:
 {
-  "summary": "String summarizing your changes",
-  "modified_files": ["list of strings of files you changed"],
-  "warnings": ["list of strings of any warnings or technical debt"]
+  "summary": "String summarizing your modifications or audit findings",
+  "modified_files": ["list of strings of files you modified, or empty list if no changes needed"],
+  "warnings": ["list of strings of any warnings, issues, or technical debt"]
 }
 DO NOT output any extra markdown or text alongside the final JSON object. Just the JSON object.
 """
@@ -126,7 +129,11 @@ class CodingAgent:
                 }
 
                 resp = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=60.0)
-                if resp.status_code != 200:
+                if resp.status_code == 429:
+                    logger.warning(f"Rate limited by {model_to_use}. Waiting 3s before retry (step {step})...")
+                    await asyncio.sleep(3.0)
+                    continue
+                elif resp.status_code != 200:
                     logger.error(f"API Error {resp.status_code}: {resp.text}")
                     break
 
@@ -135,6 +142,26 @@ class CodingAgent:
                 messages.append(message)
 
                 if message.get("tool_calls"):
+                    # Check if final completion tool was called
+                    for tc in message["tool_calls"]:
+                        fn_name = tc["function"]["name"]
+                        if fn_name in ("task_complete", "json", "complete", "final_summary"):
+                            try:
+                                args = json.loads(tc["function"]["arguments"])
+                                result = CodingResult(
+                                    summary=args.get("summary", "Engineering task modifications completed."),
+                                    modified_files=args.get("modified_files", []),
+                                    diff_summary=DiffSummary(),
+                                    warnings=args.get("warnings", [])
+                                )
+                                diff = await sandbox.collect_diff(workspace_id)
+                                if diff and diff.files_changed > 0:
+                                    result.diff_summary = diff
+                                    result.modified_files = [f.file_path for f in diff.files]
+                                return result
+                            except Exception:
+                                pass
+
                     for tc in message["tool_calls"]:
                         try:
                             args = json.loads(tc["function"]["arguments"])

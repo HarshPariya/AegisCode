@@ -135,8 +135,16 @@ class E2BSandboxProvider(SandboxProvider):
         """Write a file to the isolated E2B sandbox filesystem."""
         sandbox = await self._get_sandbox(workspace_id)
         # Normalize path — always under /home/user/workspace/
-        safe_path = f"/home/user/workspace/{file_path.lstrip('/')}"
+        clean_rel = file_path.lstrip("/\\")
+        safe_path = f"/home/user/workspace/{clean_rel}"
         try:
+            # Ensure parent directories exist
+            if "/" in clean_rel:
+                parent_dir = "/home/user/workspace/" + "/".join(clean_rel.split("/")[:-1])
+                try:
+                    await sandbox.files.make_dir(parent_dir)
+                except Exception:
+                    pass
             await sandbox.files.write(safe_path, content)
         except Exception as exc:
             raise SandboxError(f"E2B write_file failed for {file_path}: {exc}") from exc
@@ -152,14 +160,36 @@ class E2BSandboxProvider(SandboxProvider):
             raise SandboxError(f"E2B read_file failed for {file_path}: {exc}") from exc
 
     async def list_files(self, workspace_id: str, sub_path: str = "") -> List[str]:
-        """List files in the E2B sandbox workspace directory."""
+        """List files in the E2B sandbox workspace directory recursively."""
+        try:
+            git_res = await self.execute_command(workspace_id, "git ls-files")
+            if git_res.exit_code == 0 and git_res.stdout.strip():
+                lines = [f.strip() for f in git_res.stdout.strip().splitlines() if f.strip() and not f.strip().startswith(".")]
+                if lines:
+                    return lines
+        except Exception:
+            pass
+
+        try:
+            find_res = await self.execute_command(workspace_id, "find . -maxdepth 4 -not -path '*/.*' -not -path '*/node_modules*'")
+            if find_res.exit_code == 0 and find_res.stdout.strip():
+                found_files = []
+                for f in find_res.stdout.strip().splitlines():
+                    cleaned = f.strip().lstrip("./")
+                    if cleaned and not cleaned.startswith("."):
+                        found_files.append(cleaned)
+                if found_files:
+                    return found_files
+        except Exception:
+            pass
+
         sandbox = await self._get_sandbox(workspace_id)
         base = f"/home/user/workspace/{sub_path.lstrip('/')}".rstrip("/")
         try:
             entries = await sandbox.files.list(base)
             return [
                 e.name for e in entries
-                if not e.is_dir  # type: ignore[attr-defined]
+                if not getattr(e, "is_dir", False)
                 and not e.name.startswith(".")
             ]
         except Exception as exc:
@@ -258,32 +288,6 @@ class E2BSandboxProvider(SandboxProvider):
                         )
                     )
                     total_add += 1
-
-        if not diff_files:
-            files = await self.list_files(workspace_id)
-            if files:
-                for f in files[:5]:
-                    diff_files.append(
-                        FileDiff(
-                            file_path=f,
-                            status="modified",
-                            additions=1,
-                            deletions=0,
-                            patch=f"+ [AegisCode] modified {f}"
-                        )
-                    )
-                    total_add += 1
-            else:
-                diff_files.append(
-                    FileDiff(
-                        file_path="main.py",
-                        status="modified",
-                        additions=1,
-                        deletions=0,
-                        patch="+ [AegisCode] patch applied in sandbox"
-                    )
-                )
-                total_add += 1
 
         return DiffSummary(
             files_changed=len(diff_files),

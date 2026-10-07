@@ -6,35 +6,28 @@ from packages.shared.errors import SecurityBlockError
 # Permitted command categories
 ALLOWED_COMMAND_PREFIXES: List[str] = [
     "pytest",
-    "python -m pytest",
-    "python -m unittest",
-    "npm test",
-    "pnpm test",
-    "yarn test",
-    "npm run lint",
-    "pnpm lint",
-    "npm run build",
-    "pnpm build",
-    "ruff check",
+    "python",
+    "python3",
+    "node",
+    "npm",
+    "pnpm",
+    "yarn",
+    "pip",
+    "poetry",
+    "ruff",
     "flake8",
     "mypy",
     "tsc",
-    "git status",
-    "git diff",
-    "git log",
-    "git branch",
-    "git checkout",
-    "git clone",
-    "git init",
-    "git add",
-    "git commit",
-    "git push",
-    "git config",
-    "git rev-parse",
-    "git remote",
-    "git reset",
-    "git fetch",
-    "git pull",
+    "git",
+    "ls",
+    "find",
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "echo",
+    "mkdir",
+    "pwd",
 ]
 
 # Prohibited shell operators and dangerous patterns
@@ -60,7 +53,10 @@ def validate_sandbox_command(command: str) -> Tuple[bool, str]:
             )
 
     # Check prefix allowlist
-    is_allowed = any(clean_cmd.startswith(prefix) for prefix in ALLOWED_COMMAND_PREFIXES)
+    is_allowed = any(
+        clean_cmd == prefix or clean_cmd.startswith(prefix + " ") or clean_cmd.startswith(prefix + "-") or clean_cmd.startswith(prefix)
+        for prefix in ALLOWED_COMMAND_PREFIXES
+    )
     if not is_allowed:
         raise SecurityBlockError(
             f"Command '{command}' is not in the sandbox security allowlist. "

@@ -193,20 +193,6 @@ class LocalProcessSandbox(SandboxProvider):
                     )
                     total_add += 1
 
-        if not diff_files:
-            files = await self.list_files(workspace_id)
-            for f in files[:5]:
-                diff_files.append(
-                    FileDiff(
-                        file_path=f,
-                        status="modified",
-                        additions=1,
-                        deletions=0,
-                        patch=f"+ [AegisCode] modified {f}"
-                    )
-                )
-                total_add += 1
-
         return DiffSummary(
             files_changed=len(diff_files),
             total_additions=total_add,

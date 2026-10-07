@@ -25,15 +25,39 @@ router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
 
 
 async def _run_workflow_background(task_id: str):
-    """Background runner — executes multi-agent workflow for the given task."""
+    """Background runner — executes multi-agent workflow for the given task with atomic locking."""
+    from datetime import datetime, timezone
+    from database.connection import get_database
+
+    db = await get_database()
+    coll = db.get_collection("tasks")
+    now = datetime.now(timezone.utc)
+
+    # Attempt to atomically lock the task so DurableWorker does not run it concurrently
+    locked = await coll.find_one_and_update(
+        {"_id": task_id, "$or": [{"locked_by": None}, {"locked_by": "api-worker"}]},
+        {"$set": {"locked_by": "api-worker", "locked_at": now, "heartbeat_at": now}},
+        return_document=True
+    )
+    if not locked:
+        logger.info(f"Task {task_id} already claimed by another worker or process. Skipping FastAPI background runner.")
+        return
+
     task_repo = TaskRepository()
     task = await task_repo.get_by_id(task_id)
     if not task:
         logger.error(f"Background workflow: task {task_id} not found.")
+        await coll.update_one({"_id": task_id}, {"$set": {"locked_by": None, "heartbeat_at": None}})
         return
-    from orchestration.graph.workflow import AegisWorkflowRunner
-    runner = AegisWorkflowRunner()
-    await runner.execute_task_workflow(task)
+
+    try:
+        from orchestration.graph.workflow import AegisWorkflowRunner
+        runner = AegisWorkflowRunner()
+        await runner.execute_task_workflow(task)
+    except Exception as e:
+        logger.error(f"Background workflow error for task {task_id}: {e}", exc_info=True)
+    finally:
+        await coll.update_one({"_id": task_id, "locked_by": "api-worker"}, {"$set": {"locked_by": None, "heartbeat_at": None}})
 
 
 async def sync_task_pr_state_from_github(task: Task, organization_id: str) -> Task:

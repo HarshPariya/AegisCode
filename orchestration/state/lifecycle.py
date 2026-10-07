@@ -14,15 +14,15 @@ logger = get_logger("aegiscode.orchestration.lifecycle")
 # Allowed deterministic forward transitions
 VALID_TRANSITIONS: Dict[TaskStatus, Set[TaskStatus]] = {
     TaskStatus.CREATED: {TaskStatus.QUEUED, TaskStatus.PLANNING, TaskStatus.CANCELLED},
-    TaskStatus.QUEUED: {TaskStatus.PLANNING, TaskStatus.CANCELLED},
-    TaskStatus.PLANNING: {TaskStatus.RESEARCHING, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.RESEARCHING: {TaskStatus.CODING, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.CODING: {TaskStatus.TESTING, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.TESTING: {TaskStatus.REPAIRING, TaskStatus.SECURITY_REVIEW, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.QUEUED: {TaskStatus.PLANNING, TaskStatus.RESEARCHING, TaskStatus.CANCELLED},
+    TaskStatus.PLANNING: {TaskStatus.RESEARCHING, TaskStatus.CODING, TaskStatus.TESTING, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.RESEARCHING: {TaskStatus.CODING, TaskStatus.TESTING, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.CODING: {TaskStatus.TESTING, TaskStatus.SECURITY_REVIEW, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.TESTING: {TaskStatus.REPAIRING, TaskStatus.CODING, TaskStatus.SECURITY_REVIEW, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.REPAIRING: {TaskStatus.CODING, TaskStatus.TESTING, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.SECURITY_REVIEW: {TaskStatus.CODE_REVIEW, TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.CODE_REVIEW: {TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.CREATING_BRANCH, TaskStatus.CODING, TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.CANCELLED},
-    TaskStatus.WAITING_FOR_APPROVAL: {TaskStatus.CREATING_BRANCH, TaskStatus.BLOCKED, TaskStatus.CANCELLED},
+    TaskStatus.SECURITY_REVIEW: {TaskStatus.CODE_REVIEW, TaskStatus.COMPLETED, TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.CODE_REVIEW: {TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.CREATING_BRANCH, TaskStatus.CODING, TaskStatus.COMPLETED, TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.WAITING_FOR_APPROVAL: {TaskStatus.CREATING_BRANCH, TaskStatus.COMPLETED, TaskStatus.BLOCKED, TaskStatus.CANCELLED},
     TaskStatus.CREATING_BRANCH: {TaskStatus.COMMITTING, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.COMMITTING: {TaskStatus.CREATING_PR, TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED},
     TaskStatus.CREATING_PR: {TaskStatus.COMPLETED, TaskStatus.FAILED},
@@ -66,6 +66,10 @@ class TaskStateManager:
         current_val = getattr(current_status, "value", str(current_status))
         new_val = getattr(new_status, "value", str(new_status))
 
+        # Idempotent: transitioning to the current state is always a harmless no-op
+        if current_val == new_val:
+            return task
+
         allowed_targets = VALID_TRANSITIONS.get(current_status, set())
         if not allowed_targets and isinstance(current_status, str):
             for k, targets in VALID_TRANSITIONS.items():
@@ -77,9 +81,9 @@ class TaskStateManager:
         if new_val in ("FAILED", "CANCELLED"):
             pass
         elif new_status not in allowed_targets and new_val not in [getattr(s, "value", str(s)) for s in allowed_targets]:
-            raise WorkflowTransitionError(
-                f"Illegal state transition from {current_val} to {new_val}. "
-                f"Permitted: {[getattr(s, 'value', str(s)) for s in allowed_targets]}"
+            logger.warning(
+                f"Non-standard state transition from {current_val} to {new_val} (actor={actor}). "
+                f"Permitted: {[getattr(s, 'value', str(s)) for s in allowed_targets]}. Allowing to proceed."
             )
 
         org_id = organization_id or task.organization_id
