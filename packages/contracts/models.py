@@ -75,6 +75,13 @@ class CodingResult(BaseModel):
         return v
 
 
+class RevisedCodeFile(BaseModel):
+    file_path: str
+    content: str
+    summary: str
+
+
+
 class TestCaseResult(BaseModel):
     name: str
     status: str  # passed | failed | error | skipped

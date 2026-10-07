@@ -265,8 +265,7 @@ export default function TaskDetailPage({ params }: { params?: any }) {
           <div className="space-y-1">
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{task.title}</h1>
-              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                task.pr_status === "merged"
+              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${task.pr_status === "merged"
                   ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
                   : task.status === "COMPLETED"
                     ? "bg-accent-emerald/10 text-accent-emerald border-accent-emerald/30"
@@ -275,7 +274,7 @@ export default function TaskDetailPage({ params }: { params?: any }) {
                       : task.status === "FAILED"
                         ? "bg-accent-rose/10 text-accent-rose border-accent-rose/30"
                         : "bg-brand-500/10 text-brand-400 border-brand-500/30"
-              }`}>
+                }`}>
                 {task.pr_status === "merged" ? "MERGED" : task.status}
               </span>
               {task.pr_status === "merged" && (
@@ -338,11 +337,10 @@ export default function TaskDetailPage({ params }: { params?: any }) {
                 href={task.pull_request_url}
                 target="_blank"
                 rel="noreferrer"
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all shadow-glow ${
-                  task.pr_status === "merged"
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all shadow-glow ${task.pr_status === "merged"
                     ? "bg-purple-600 text-white hover:bg-purple-500"
                     : "bg-accent-emerald text-slate-950 hover:bg-emerald-400"
-                }`}
+                  }`}
               >
                 <GitPullRequest className="h-4 w-4" />
                 <span>
@@ -390,6 +388,56 @@ export default function TaskDetailPage({ params }: { params?: any }) {
               </p>
             </div>
           </div>
+
+          {/* Code Diff Preview inside Human Approval Banner */}
+          {diff && diff.files && diff.files.length > 0 ? (
+            <div className="rounded-xl border border-surfaceBorder/80 bg-[#060A12] overflow-hidden">
+              <div className="flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-slate-300 bg-surface/60 border-b border-surfaceBorder/60">
+                <div className="flex items-center gap-2">
+                  <FileCode className="h-4 w-4 text-brand-400" />
+                  <span>Staged Code Changes ({diff.files_changed} file{diff.files_changed !== 1 ? "s" : ""})</span>
+                </div>
+                <div className="font-mono text-[11px] text-slate-400">
+                  <span className="text-accent-emerald font-bold">+{diff.total_additions}</span>{" / "}
+                  <span className="text-accent-rose font-bold">-{diff.total_deletions}</span>
+                </div>
+              </div>
+              <div className="p-3 max-h-64 overflow-y-auto space-y-3">
+                {diff.files.map((file: any, idx: number) => (
+                  <div key={idx} className="rounded-lg border border-surfaceBorder/60 bg-[#0A0E17] overflow-hidden">
+                    <div className="px-3 py-1.5 bg-background/80 border-b border-surfaceBorder/40 text-[11px] font-mono text-slate-300 flex items-center justify-between">
+                      <span className="font-bold text-brand-300">{file.file_path}</span>
+                      <span className="text-accent-emerald font-medium">+{file.additions} lines</span>
+                    </div>
+                    <pre className="p-3 text-[11.5px] font-mono text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">
+                      {file.patch ? (
+                        file.patch.split("\n").map((line: string, lineIdx: number) => {
+                          let lineClass = "text-slate-400";
+                          if (line.startsWith("+") && !line.startsWith("+++")) lineClass = "text-emerald-400 bg-emerald-500/10 px-1 rounded-sm";
+                          else if (line.startsWith("-") && !line.startsWith("---")) lineClass = "text-rose-400 bg-rose-500/10 px-1 rounded-sm";
+                          else if (line.startsWith("@")) lineClass = "text-cyan-400";
+                          return <div key={lineIdx} className={lineClass}>{line}</div>;
+                        })
+                      ) : (
+                        <div className="text-slate-500 italic">File modified in sandbox workspace</div>
+                      )}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-surface/50 border border-surfaceBorder/60 text-xs text-slate-400">
+              <span>Reviewing changes: Inspect the full diff under the <strong>Changed Files &amp; Diff</strong> tab below.</span>
+              <button
+                type="button"
+                onClick={() => setActiveTab("diff")}
+                className="text-brand-400 hover:text-brand-300 font-semibold underline underline-offset-2 ml-2"
+              >
+                View Diff Tab
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-3 pt-2">
             <button

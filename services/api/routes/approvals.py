@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Query
 from pydantic import BaseModel
 from database.models.approval import Approval
+from database.models.task import Task
 from database.models.user import User, Organization
 from database.repositories.base import BaseRepository
 from database.repositories.task_repository import TaskRepository
 from database.repositories.audit_repository import AuditRepository
 from orchestration.state.lifecycle import TaskStateManager
-from packages.contracts.models import ApprovalDecisionModel
+from packages.contracts.models import ApprovalDecisionModel, DiffSummary
 from packages.shared.constants import TaskStatus, RiskLevel
 from services.api.dependencies import get_current_user, get_current_organization
 from orchestration.graph.workflow import AegisWorkflowRunner
@@ -39,6 +40,20 @@ class ApprovalResponse(BaseModel):
     decision_reason: Optional[str] = None
     decided_at: Optional[datetime] = None
     diff: Optional[str] = None
+
+
+def _extract_diff_string(approval: Approval, task: Optional[Task]) -> Optional[str]:
+    diff_val = getattr(approval, "diff", None)
+    if diff_val and isinstance(diff_val, str):
+        return diff_val
+    if task and task.diff:
+        if isinstance(task.diff, DiffSummary) and task.diff.files:
+            return "\n".join(f.patch for f in task.diff.files if f.patch)
+        elif isinstance(task.diff, dict) and task.diff.get("files"):
+            return "\n".join(f.get("patch", "") for f in task.diff["files"] if f.get("patch"))
+        elif isinstance(task.diff, str):
+            return task.diff
+    return None
 
 
 @router.get("/approvals", response_model=List[ApprovalResponse])
@@ -80,7 +95,7 @@ async def list_pending_approvals(
                 created_at=a.created_at,
                 decision_reason=getattr(a, "decision_reason", None) or getattr(a, "decision_note", None),
                 decided_at=getattr(a, "decided_at", None),
-                diff=getattr(a, "diff", None) or (task.diff if task else None),
+                diff=_extract_diff_string(a, task),
             )
         )
     return results
@@ -116,7 +131,7 @@ async def get_task_approvals(
             created_at=a.created_at,
             decision_reason=getattr(a, "decision_reason", None) or getattr(a, "decision_note", None),
             decided_at=getattr(a, "decided_at", None),
-            diff=getattr(a, "diff", None) or (task.diff if task else None),
+            diff=_extract_diff_string(a, task),
         ) for a in approvals
     ]
 

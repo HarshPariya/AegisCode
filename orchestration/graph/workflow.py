@@ -65,6 +65,15 @@ class AegisWorkflowRunner:
             status=TaskStatus.PLANNING,
         )
 
+        if task.diff:
+            if isinstance(task.diff, DiffSummary):
+                state.diff_summary = task.diff
+            elif isinstance(task.diff, dict):
+                try:
+                    state.diff_summary = DiffSummary.model_validate(task.diff)
+                except Exception as e:
+                    logger.warning(f"Could not restore task.diff: {e}")
+
         # Resolve target repository from MongoDB
         repo_repo = RepositoryRepository()
         target_repo = None
@@ -91,68 +100,96 @@ class AegisWorkflowRunner:
                             target_repo = r
                             break
 
+        current_task_status = getattr(task.status, "value", str(task.status))
+        skip_to_github = current_task_status in (
+            TaskStatus.CREATING_BRANCH.value, TaskStatus.COMMITTING.value, TaskStatus.CREATING_PR.value
+        )
+        skip_to_security = current_task_status in (
+            TaskStatus.TESTING.value, TaskStatus.SECURITY_REVIEW.value,
+            TaskStatus.CODE_REVIEW.value, TaskStatus.WAITING_FOR_APPROVAL.value
+        )
+
         try:
             # 1. Workspace Initialization & Real Clone
-            await self.sandbox.create_workspace(workspace_id)
-            if target_repo:
-                try:
-                    auth_clone_url = None
-                    gh_install = None
-                    if getattr(target_repo, "github_installation_id", None):
-                        gh_install = await self.gh_install_repo.get_by_installation_id(
-                            target_repo.github_installation_id, organization_id=target_repo.organization_id
-                        )
-                    if not gh_install:
-                        insts = await self.gh_install_repo.list_by_org(task.organization_id)
-                        for inst in insts:
-                            if getattr(inst, "auth_type", "app") == "pat" and inst.access_token:
-                                gh_install = inst
-                                break
-                    if not gh_install:
-                        all_insts = await self.gh_install_repo.list(limit=50)
-                        for inst in all_insts:
-                            if getattr(inst, "auth_type", "app") == "pat" and inst.access_token:
-                                gh_install = inst
-                                break
+            ws_exists = False
+            try:
+                ws_files = await self.sandbox.list_files(workspace_id)
+                if ws_files:
+                    ws_exists = True
+            except Exception:
+                ws_exists = False
 
-                    repo_slug = target_repo.full_name if "/" in target_repo.full_name else f"{getattr(gh_install, 'account_login', 'repo')}/{target_repo.name}"
-
-                    if gh_install and getattr(gh_install, "auth_type", "app") == "pat" and gh_install.access_token:
-                        auth_clone_url = f"https://x-access-token:{gh_install.access_token}@github.com/{repo_slug}.git"
-                    elif self.github.is_configured and getattr(target_repo, "github_installation_id", None):
-                        token = await self.github.get_installation_token(target_repo.github_installation_id)
-                        auth_clone_url = f"https://x-access-token:{token}@github.com/{repo_slug}.git"
-                    elif target_repo.clone_url:
-                        auth_clone_url = target_repo.clone_url
-
-                    if auth_clone_url:
-                        branch_to_clone = task.branch or target_repo.default_branch or "main"
-                        logger.info(f"Cloning {repo_slug} (branch: {branch_to_clone}) into workspace {workspace_id}...")
-                        clone_res = await self.sandbox.execute_command(
-                            workspace_id,
-                            f"git clone --depth 1 -b {branch_to_clone} {auth_clone_url} ."
-                        )
-                        if clone_res.exit_code != 0:
-                            logger.warning(f"Branch clone failed: {clone_res.stderr}. Retrying default clone...")
-                            clone_res2 = await self.sandbox.execute_command(
-                                workspace_id,
-                                f"git clone --depth 1 {auth_clone_url} ."
+            if not skip_to_github or not ws_exists:
+                await self.sandbox.create_workspace(workspace_id)
+                if target_repo:
+                    try:
+                        auth_clone_url = None
+                        gh_install = None
+                        if getattr(target_repo, "github_installation_id", None):
+                            gh_install = await self.gh_install_repo.get_by_installation_id(
+                                target_repo.github_installation_id, organization_id=target_repo.organization_id
                             )
-                            if clone_res2.exit_code != 0:
-                                logger.info(f"Cloning failed or repo empty. Initializing git workspace for {repo_slug}...")
-                                await self.sandbox.execute_command(workspace_id, "git init")
-                                await self.sandbox.execute_command(workspace_id, f"git remote add origin {auth_clone_url}")
-                except Exception as clone_err:
-                    logger.error(f"Failed to clone repository {getattr(target_repo, 'full_name', 'unknown')}: {clone_err}")
+                        if not gh_install:
+                            insts = await self.gh_install_repo.list_by_org(task.organization_id)
+                            for inst in insts:
+                                if getattr(inst, "auth_type", "app") == "pat" and inst.access_token:
+                                    gh_install = inst
+                                    break
+                        if not gh_install:
+                            all_insts = await self.gh_install_repo.list(limit=50)
+                            for inst in all_insts:
+                                if getattr(inst, "auth_type", "app") == "pat" and inst.access_token:
+                                    gh_install = inst
+                                    break
 
-            current_task_status = getattr(task.status, "value", str(task.status))
-            skip_to_github = current_task_status in (
-                TaskStatus.CREATING_BRANCH.value, TaskStatus.COMMITTING.value, TaskStatus.CREATING_PR.value
-            )
-            skip_to_security = current_task_status in (
-                TaskStatus.TESTING.value, TaskStatus.SECURITY_REVIEW.value,
-                TaskStatus.CODE_REVIEW.value, TaskStatus.WAITING_FOR_APPROVAL.value
-            )
+                        repo_slug = target_repo.full_name if "/" in target_repo.full_name else f"{getattr(gh_install, 'account_login', 'repo')}/{target_repo.name}"
+
+                        if gh_install and getattr(gh_install, "auth_type", "app") == "pat" and gh_install.access_token:
+                            auth_clone_url = f"https://x-access-token:{gh_install.access_token}@github.com/{repo_slug}.git"
+                        elif self.github.is_configured and getattr(target_repo, "github_installation_id", None):
+                            token = await self.github.get_installation_token(target_repo.github_installation_id)
+                            auth_clone_url = f"https://x-access-token:{token}@github.com/{repo_slug}.git"
+                        elif target_repo.clone_url:
+                            auth_clone_url = target_repo.clone_url
+
+                        if auth_clone_url:
+                            branch_to_clone = task.branch or target_repo.default_branch or "main"
+                            logger.info(f"Cloning {repo_slug} (branch: {branch_to_clone}) into workspace {workspace_id}...")
+                            clone_res = await self.sandbox.execute_command(
+                                workspace_id,
+                                f"git clone --depth 1 -b {branch_to_clone} {auth_clone_url} ."
+                            )
+                            if clone_res.exit_code != 0:
+                                logger.warning(f"Branch clone failed: {clone_res.stderr}. Retrying default clone...")
+                                clone_res2 = await self.sandbox.execute_command(
+                                    workspace_id,
+                                    f"git clone --depth 1 {auth_clone_url} ."
+                                )
+                                if clone_res2.exit_code != 0:
+                                    logger.info(f"Cloning failed or repo empty. Initializing git workspace for {repo_slug}...")
+                                    await self.sandbox.execute_command(workspace_id, "git init")
+                                    await self.sandbox.execute_command(workspace_id, f"git remote add origin {auth_clone_url}")
+                    except Exception as clone_err:
+                        logger.error(f"Failed to clone repository {getattr(target_repo, 'full_name', 'unknown')}: {clone_err}")
+
+            if skip_to_github:
+                if not ws_exists and state.diff_summary and state.diff_summary.files:
+                    # Fresh workspace on resume — re-apply saved patches from task diff
+                    for f in state.diff_summary.files:
+                        if f.patch:
+                            try:
+                                await self.sandbox.write_file(workspace_id, ".aegis_pending.patch", f.patch)
+                                await self.sandbox.execute_command(workspace_id, "git apply --whitespace=fix .aegis_pending.patch")
+                                await self.sandbox.execute_command(workspace_id, "rm -f .aegis_pending.patch")
+                            except Exception as patch_err:
+                                logger.warning(f"Could not re-apply patch for {f.file_path}: {patch_err}")
+                elif not state.diff_summary or not state.diff_summary.files:
+                    try:
+                        collected = await self.sandbox.collect_diff(workspace_id)
+                        if collected and collected.files_changed > 0:
+                            state.diff_summary = collected
+                    except Exception:
+                        pass
 
             if not skip_to_github and not skip_to_security:
                 # 2. Planning Step — only if not resuming mid-pipeline
@@ -235,28 +272,7 @@ class AegisWorkflowRunner:
                 )
                 await self.task_repo.update(task.id, {"review_results": state.review.model_dump()})
 
-                # 7. Policy Check
-                needs_approval, risk_level, reason = self.policy_engine.evaluate_execution(
-                    action="create_pull_request",
-                    execution_policy=state.execution_policy
-                )
-                # Check if this task already has an approved human sign-off
-                approval_repo = BaseRepository(Approval, "approvals")
-                approved_records = await approval_repo.list(
-                    query={"task_id": task.id, "status": "approved"}
-                )
-                if needs_approval and not approved_records:
-                    task = await self.state_mgr.transition_to(
-                        task,
-                        TaskStatus.WAITING_FOR_APPROVAL,
-                        actor="policy_engine",
-                        metadata={"reason": reason, "risk_level": risk_level.value}
-                    )
-                    state.requires_approval = True
-                    state.approval_reason = reason
-                    return state
-
-            # 8. Check if any code changes were produced
+            # 7. Check if any code changes were produced
             has_code_changes = bool(state.diff_summary and state.diff_summary.files and state.diff_summary.files_changed > 0)
 
             if not has_code_changes:
@@ -284,6 +300,57 @@ class AegisWorkflowRunner:
                     }
                 )
                 state.status = TaskStatus.COMPLETED
+                return state
+
+            # 8. Code changes exist: evaluate human approval before creating branch / opening PR
+            approval_repo = BaseRepository(Approval, "approvals")
+            approved_records = await approval_repo.list(
+                query={"task_id": task.id, "status": "approved"}
+            )
+
+            needs_approval, risk_level, reason = self.policy_engine.evaluate_execution(
+                action="create_pull_request",
+                execution_policy=state.execution_policy
+            )
+
+            if needs_approval and not approved_records:
+                # Create or update pending Approval record in MongoDB so it displays on /approvals
+                pending_records = await approval_repo.list(
+                    query={"task_id": task.id, "status": "pending"}
+                )
+                if not pending_records:
+                    approval_doc = Approval(
+                        task_id=task.id,
+                        organization_id=task.organization_id,
+                        requested_by=task.user_id or "system",
+                        requested_by_agent="reviewer",
+                        action="Authorize Code Changes & Create Pull Request",
+                        status="pending",
+                        risk_level=getattr(risk_level, "value", str(risk_level)) if risk_level else "MEDIUM",
+                        reason=reason or f"Code modifications ready for '{state.title}' ({state.diff_summary.files_changed} files changed). Human authorization required before PR creation.",
+                        diff=diff_text,
+                    )
+                    await approval_repo.create(approval_doc)
+
+                # Persist task diff and update status in MongoDB
+                await self.task_repo.update(task.id, {
+                    "diff": state.diff_summary.model_dump(),
+                    "status": TaskStatus.WAITING_FOR_APPROVAL.value,
+                })
+
+                task = await self.state_mgr.transition_to(
+                    task,
+                    TaskStatus.WAITING_FOR_APPROVAL,
+                    actor="reviewer",
+                    metadata={
+                        "message": f"Code modifications ready ({state.diff_summary.files_changed} files changed). Waiting for developer approval before creating Pull Request.",
+                        "reason": reason,
+                        "risk_level": getattr(risk_level, "value", str(risk_level)) if risk_level else "MEDIUM",
+                        "files_changed": state.diff_summary.files_changed,
+                    }
+                )
+                state.requires_approval = True
+                state.approval_reason = reason
                 return state
 
             # If code changes exist, proceed with GitHub PR Flow

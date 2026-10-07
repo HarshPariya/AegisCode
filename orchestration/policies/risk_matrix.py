@@ -51,8 +51,8 @@ class PolicyEngine:
                 return True, risk, f"Action '{action}' requires approval due to {risk.value} risk."
             return False, risk, "Auto-approved"
 
-        # Standard policy: requires approval for HIGH / CRITICAL
-        if risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
+        # Standard policy: requires human authorization for MEDIUM, HIGH, and CRITICAL actions (e.g. modify_source, create_pull_request)
+        if risk in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL):
             return True, risk, f"Action '{action}' requires human sign-off ({risk.value} risk)."
 
         return False, risk, "Auto-approved under standard policy"

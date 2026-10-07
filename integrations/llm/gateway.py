@@ -88,8 +88,8 @@ class ProviderConfig:
             # If default/OpenAI model names are configured, map to best Groq equivalent
             if not self.model_name:
                 return "openai/gpt-oss-120b"  # Default Groq model
-            if self.model_name in ("gpt-4o", "gpt-4", "gpt-4-turbo"):
-                return "openai/gpt-oss-120b"  # Map OpenAI names to Groq equivalent
+            if self.model_name in ("gpt-4o", "gpt-4", "gpt-4-turbo", "openai/gpt-oss-20b"):
+                return "openai/gpt-oss-120b"  # Map OpenAI / unstable names to stable Groq model
             return self.model_name  # Use as-is (e.g. openai/gpt-oss-120b, llama-3.1-8b-instant)
         return self.model_name
 
@@ -342,7 +342,16 @@ class ModelGateway:
                     f"(task total: {cumulative}/{self.max_tokens_per_task})"
                 )
 
-            parsed = json.loads(content)
+            clean_content = content.strip()
+            if clean_content.startswith("```json"):
+                clean_content = clean_content[7:]
+            elif clean_content.startswith("```"):
+                clean_content = clean_content[3:]
+            if clean_content.endswith("```"):
+                clean_content = clean_content[:-3]
+            clean_content = clean_content.strip()
+
+            parsed = json.loads(clean_content)
             return response_schema.model_validate(parsed)
 
     async def _call_gemini(
