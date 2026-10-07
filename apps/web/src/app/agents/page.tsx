@@ -30,7 +30,7 @@ import {
   Play,
   Clock,
 } from "lucide-react";
-import { api, getCachedApiData, hasCachedApiData } from "@/lib/api";
+import { api, getCachedApiData, hasCachedApiData, getApiBaseUrl } from "@/lib/api";
 import { ClientPortal } from "@/components/ClientPortal";
 
 type ViewTab = "WORKFORCE" | "WORKFLOW" | "A2A";
@@ -655,7 +655,7 @@ export default function AgentsPage() {
             </div>
 
             <a
-              href={`${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/a2a/cards`}
+              href={`${getApiBaseUrl()}/api/a2a/cards`}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 rounded-xl border border-surfaceBorder bg-background px-4 py-2 text-xs font-bold text-white hover:border-brand-500/50 transition-colors shrink-0"

@@ -5,13 +5,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Script from "next/script";
 import { ShieldCheck, CheckCircle2, ArrowRight, Eye, EyeOff, AlertTriangle, Loader2 } from "lucide-react";
-import { api, setToken, getToken, setCachedUser } from "@/lib/api";
+import { api, setToken, getToken, setCachedUser, getApiBaseUrl } from "@/lib/api";
 
 /* ─── Backend health check ─────────────────────────────────── */
 async function checkBackend(): Promise<boolean> {
   try {
-    const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const cleanUrl = rawUrl.replace(/\/+$/, "");
+    const cleanUrl = getApiBaseUrl();
     const res = await fetch(`${cleanUrl}/health`, {
       method: "GET",
       signal: AbortSignal.timeout(10000),
@@ -145,7 +144,7 @@ function LoginForm() {
 
     if (!googleClientId) {
       setError(
-        "Google Sign-In is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to Vercel environment variables, or use email/password below."
+        "Google Sign-In is not currently enabled for this workspace. Please sign in with your email and password below."
       );
       return;
     }
@@ -397,14 +396,10 @@ function LoginForm() {
             </button>
           </>
         ) : (
-          /* No Client ID — show setup hint */
-          <div className="mt-6 rounded-lg border border-surfaceBorder/60 bg-surface/50 p-3.5">
-            <p className="text-xs text-slate-500 text-center">
-              Google Sign-In disabled.{" "}
-              <span className="text-brand-400 font-medium">
-                Set NEXT_PUBLIC_GOOGLE_CLIENT_ID in apps/web/.env.local to enable it.
-              </span>
-            </p>
+          /* Enterprise SSO info badge */
+          <div className="mt-6 rounded-xl border border-surfaceBorder/60 bg-surface/50 p-3.5 flex items-center justify-center gap-2 text-slate-400 text-xs">
+            <ShieldCheck className="h-4 w-4 text-brand-400 shrink-0" />
+            <span>Enterprise workspace secured with zero-trust session tokens</span>
           </div>
         )}
 

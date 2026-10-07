@@ -22,6 +22,10 @@ export function getApiBaseUrl(): string {
     return "https://aegiscode-api.onrender.com";
   }
 
+  if (process.env.NODE_ENV === "production") {
+    return "https://aegiscode-api.onrender.com";
+  }
+
   return "http://localhost:8000";
 }
 

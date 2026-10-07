@@ -22,7 +22,7 @@ import {
   ShieldAlert,
   RotateCcw,
 } from "lucide-react";
-import { api, getToken, getCachedApiData, hasCachedApiData } from "@/lib/api";
+import { api, getToken, getCachedApiData, hasCachedApiData, getApiBaseUrl } from "@/lib/api";
 
 const AGENT_STAGES = [
   { id: "PLANNING", label: "Planning", agent: "Supervisor", role: "supervisor" },
@@ -85,7 +85,7 @@ export default function TaskDetailPage({ params }: { params?: any }) {
     }, 2000);
 
     // Setup SSE Realtime Stream
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_BASE = getApiBaseUrl();
     const token = getToken();
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
     let eventSource: EventSource | null = null;
@@ -266,14 +266,14 @@ export default function TaskDetailPage({ params }: { params?: any }) {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{task.title}</h1>
               <span className={`text-xs font-bold px-3 py-1 rounded-full border ${task.pr_status === "merged"
-                  ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
-                  : task.status === "COMPLETED"
-                    ? "bg-accent-emerald/10 text-accent-emerald border-accent-emerald/30"
-                    : task.status === "WAITING_FOR_APPROVAL"
-                      ? "bg-accent-amber/10 text-accent-amber border-accent-amber/30 animate-pulse"
-                      : task.status === "FAILED"
-                        ? "bg-accent-rose/10 text-accent-rose border-accent-rose/30"
-                        : "bg-brand-500/10 text-brand-400 border-brand-500/30"
+                ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
+                : task.status === "COMPLETED"
+                  ? "bg-accent-emerald/10 text-accent-emerald border-accent-emerald/30"
+                  : task.status === "WAITING_FOR_APPROVAL"
+                    ? "bg-accent-amber/10 text-accent-amber border-accent-amber/30 animate-pulse"
+                    : task.status === "FAILED"
+                      ? "bg-accent-rose/10 text-accent-rose border-accent-rose/30"
+                      : "bg-brand-500/10 text-brand-400 border-brand-500/30"
                 }`}>
                 {task.pr_status === "merged" ? "MERGED" : task.status}
               </span>
@@ -338,8 +338,8 @@ export default function TaskDetailPage({ params }: { params?: any }) {
                 target="_blank"
                 rel="noreferrer"
                 className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all shadow-glow ${task.pr_status === "merged"
-                    ? "bg-purple-600 text-white hover:bg-purple-500"
-                    : "bg-accent-emerald text-slate-950 hover:bg-emerald-400"
+                  ? "bg-purple-600 text-white hover:bg-purple-500"
+                  : "bg-accent-emerald text-slate-950 hover:bg-emerald-400"
                   }`}
               >
                 <GitPullRequest className="h-4 w-4" />
