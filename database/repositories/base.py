@@ -71,7 +71,7 @@ class BaseRepository(Generic[T]):
         col = await self._col()
         q = query or {}
         q.update(kwargs)
-        cursor = col.find(q).sort(sort_field, sort_direction).skip(skip).limit(limit)
+        cursor = col.find(q, allow_disk_use=True).sort(sort_field, sort_direction).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
         results = []
         for d in docs:

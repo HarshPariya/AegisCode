@@ -41,6 +41,8 @@ class AgentTaskState(BaseModel):
     repair_count: int = 0
     max_repairs: int = 3
     repair_context: Optional[str] = None
+    tokens_consumed: int = 0
+    estimated_cost_usd: float = 0.0
 
     # Status & PR output
     status: TaskStatus = TaskStatus.CREATED

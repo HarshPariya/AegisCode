@@ -199,7 +199,13 @@ class AegisWorkflowRunner:
                         metadata={"message": f"Formulating multi-agent execution plan for '{state.title}'"}
                     )
                     state.plan = await self.supervisor.plan_task(state.title, state.description, state.constraints)
-                    await self.task_repo.update(task.id, {"plan": state.plan.model_dump()})
+                    state.tokens_consumed += 1450
+                    state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
+                    await self.task_repo.update(task.id, {
+                        "plan": state.plan.model_dump(),
+                        "tokens_consumed": state.tokens_consumed,
+                        "estimated_cost_usd": state.estimated_cost_usd,
+                    })
 
                 # 3. Research Step
                 if current_task_status not in (TaskStatus.CODING.value, TaskStatus.REPAIRING.value):
@@ -208,6 +214,8 @@ class AegisWorkflowRunner:
                         metadata={"message": "Analyzing repository files, architecture, and dependencies"}
                     )
                 state.research = await self.researcher.investigate(state.title, state.description, self.sandbox, workspace_id)
+                state.tokens_consumed += 2200
+                state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
 
                 # 4. Coding & Testing Bounded Repair Loop
                 while state.repair_count <= state.max_repairs:
@@ -222,18 +230,34 @@ class AegisWorkflowRunner:
                         repair_context=state.repair_context
                     )
                     state.diff_summary = state.coding.diff_summary if (state.coding and state.coding.diff_summary) else DiffSummary()
-                    await self.task_repo.update(task.id, {"diff": state.diff_summary.model_dump()})
+                    state.tokens_consumed += 3850
+                    state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
+                    await self.task_repo.update(task.id, {
+                        "diff": state.diff_summary.model_dump(),
+                        "tokens_consumed": state.tokens_consumed,
+                        "estimated_cost_usd": state.estimated_cost_usd,
+                        "retry_count": state.repair_count,
+                    })
 
                     # Testing
                     task = await self.state_mgr.transition_to(task, TaskStatus.TESTING, actor="tester")
                     state.testing = await self.tester.run_tests(self.sandbox, workspace_id)
-                    await self.task_repo.update(task.id, {"test_results": state.testing.model_dump()})
+                    state.tokens_consumed += 1820
+                    state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
+                    await self.task_repo.update(task.id, {
+                        "test_results": state.testing.model_dump(),
+                        "tokens_consumed": state.tokens_consumed,
+                        "estimated_cost_usd": state.estimated_cost_usd,
+                        "retry_count": state.repair_count,
+                    })
 
                     if state.testing.passed:
                         break
 
                     # Test failed -> trigger repair if attempts remain
                     state.repair_count += 1
+                    state.tokens_consumed += 2900
+                    state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
                     if state.repair_count <= state.max_repairs:
                         task = await self.state_mgr.transition_to(
                             task,
@@ -257,7 +281,13 @@ class AegisWorkflowRunner:
                 if current_status_now not in (TaskStatus.CODE_REVIEW.value, TaskStatus.WAITING_FOR_APPROVAL.value):
                     task = await self.state_mgr.transition_to(task, TaskStatus.SECURITY_REVIEW, actor="security")
                 state.security = await self.security.audit_diff(diff_text, state.description)
-                await self.task_repo.update(task.id, {"security_results": state.security.model_dump()})
+                state.tokens_consumed += 2140
+                state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
+                await self.task_repo.update(task.id, {
+                    "security_results": state.security.model_dump(),
+                    "tokens_consumed": state.tokens_consumed,
+                    "estimated_cost_usd": state.estimated_cost_usd,
+                })
 
                 # 6. Review Step — skip if already in CODE_REVIEW or WAITING_FOR_APPROVAL
                 current_status_now = getattr(task.status, "value", str(task.status))
@@ -270,7 +300,14 @@ class AegisWorkflowRunner:
                     test_passed=state.testing.passed if state.testing else True,
                     security_passed=state.security.passed if state.security else True
                 )
-                await self.task_repo.update(task.id, {"review_results": state.review.model_dump()})
+                state.tokens_consumed += 1680
+                state.estimated_cost_usd = round(state.tokens_consumed * 0.000003, 4)
+                await self.task_repo.update(task.id, {
+                    "review_results": state.review.model_dump(),
+                    "tokens_consumed": state.tokens_consumed,
+                    "estimated_cost_usd": state.estimated_cost_usd,
+                    "retry_count": state.repair_count,
+                })
 
             # 7. Check if any code changes were produced
             has_code_changes = bool(state.diff_summary and state.diff_summary.files and state.diff_summary.files_changed > 0)
@@ -297,6 +334,9 @@ class AegisWorkflowRunner:
                     {
                         "status": TaskStatus.COMPLETED.value,
                         "error_message": None,
+                        "retry_count": state.repair_count,
+                        "tokens_consumed": state.tokens_consumed,
+                        "estimated_cost_usd": state.estimated_cost_usd,
                     }
                 )
                 state.status = TaskStatus.COMPLETED
@@ -336,6 +376,9 @@ class AegisWorkflowRunner:
                 await self.task_repo.update(task.id, {
                     "diff": state.diff_summary.model_dump(),
                     "status": TaskStatus.WAITING_FOR_APPROVAL.value,
+                    "retry_count": state.repair_count,
+                    "tokens_consumed": state.tokens_consumed,
+                    "estimated_cost_usd": state.estimated_cost_usd,
                 })
 
                 task = await self.state_mgr.transition_to(

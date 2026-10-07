@@ -38,6 +38,8 @@ class Task(MongoBaseModel):
     trace_id: Optional[str] = None
     error_message: Optional[str] = None
     retry_count: int = 0
+    tokens_consumed: int = 0
+    estimated_cost_usd: float = 0.0
     locked_by: Optional[str] = None
     locked_at: Optional[datetime] = None
     heartbeat_at: Optional[datetime] = None

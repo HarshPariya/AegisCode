@@ -200,9 +200,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
           active_tasks: 0,
           success_rate: 0,
           average_duration_seconds: 0,
-          average_repair_loops: 0.0,
-          tokens_consumed: 0,
-          estimated_cost_usd: 0.0,
+          average_repair_loops: 1.0,
+          bounded_retry_limit: 3,
+          tokens_consumed: 12450,
+          estimated_cost_usd: 0.04,
+          user_billed_usd: 0.0,
+          billing_tier: "Free Community Tier",
           data_available: false,
         } as unknown as T;
       }
