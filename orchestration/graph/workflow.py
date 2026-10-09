@@ -112,7 +112,7 @@ class AegisWorkflowRunner:
         state: AgentTaskState,
     ) -> bool:
         """Push modified files directly to GitHub using the GitHub Git Database REST API.
-        
+
         Operates purely over HTTPS from the backend host (independent of sandbox network/DNS),
         reading modified files from the sandbox and publishing them directly to GitHub.
         """

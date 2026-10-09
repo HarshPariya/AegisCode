@@ -13,7 +13,6 @@ from orchestration.state.lifecycle import TaskStateManager
 from packages.contracts.models import ApprovalDecisionModel, DiffSummary
 from packages.shared.constants import TaskStatus, RiskLevel
 from services.api.dependencies import get_current_user, get_current_organization
-from orchestration.graph.workflow import AegisWorkflowRunner
 
 router = APIRouter(prefix="/api", tags=["Approvals"])
 
