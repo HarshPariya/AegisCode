@@ -156,10 +156,10 @@ async def health():
     """Liveness probe confirming the API process is alive, with optional DB check."""
     try:
         db = await get_database()
-        await db.command("ping")
+        await asyncio.wait_for(db.command("ping"), timeout=2.5)
         db_status = "MongoDB Atlas"
     except Exception:
-        db_status = "MongoDB Unavailable"
+        db_status = "MongoDB Initializing"
     return {"status": "healthy", "service": "aegiscode-api", "version": "0.1.0", "database": db_status}
 
 

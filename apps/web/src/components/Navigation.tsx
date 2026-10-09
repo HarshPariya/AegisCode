@@ -111,7 +111,11 @@ export function Navigation() {
   useEffect(() => {
     const checkEngine = () => {
       const apiBase = getApiBaseUrl();
-      fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(3500) })
+      let signal: AbortSignal | undefined;
+      if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+        try { signal = AbortSignal.timeout(15000); } catch { }
+      }
+      fetch(`${apiBase}/health`, { signal })
         .then((r) => setDbHealthy(r.ok))
         .catch(() => setDbHealthy(false));
     };

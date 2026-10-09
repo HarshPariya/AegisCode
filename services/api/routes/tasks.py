@@ -279,12 +279,15 @@ async def cancel_task(
     return map_task_to_response(cancelled_task)
 
 
+@router.post("/{id}/execute", response_model=TaskResponse)
 @router.post("/{id}/resume", response_model=TaskResponse)
-async def resume_task(
+async def resume_or_execute_task(
     id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_organization),
 ):
+    """Resume or retry an existing engineering task and immediately dispatch execution."""
     task_repo = TaskRepository()
     task = await task_repo.get_by_id(id, organization_id=current_org.id)
     if not task:
@@ -292,7 +295,12 @@ async def resume_task(
 
     state_mgr = TaskStateManager(task_repo)
     try:
-        resumed_task = await state_mgr.resume_task(task)
+        if task.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.WAITING_FOR_APPROVAL}:
+            resumed_task = await state_mgr.resume_task(task)
+        else:
+            resumed_task = task
+
+        background_tasks.add_task(_run_workflow_background, id)
         return map_task_to_response(resumed_task)
     except WorkflowTransitionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)

@@ -11,9 +11,11 @@ export function Footer() {
     const checkHealth = async () => {
       try {
         const apiBase = getApiBaseUrl();
-        const res = await fetch(`${apiBase}/health`, {
-          signal: AbortSignal.timeout(3500),
-        });
+        let signal: AbortSignal | undefined;
+        if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+          try { signal = AbortSignal.timeout(15000); } catch { }
+        }
+        const res = await fetch(`${apiBase}/health`, { signal });
         if (res.ok) {
           const data = await res.json();
           setBackendOnline(true);

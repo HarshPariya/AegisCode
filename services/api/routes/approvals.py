@@ -19,11 +19,8 @@ router = APIRouter(prefix="/api", tags=["Approvals"])
 
 
 async def resume_workflow_background(task_id: str):
-    task_repo = TaskRepository()
-    task = await task_repo.get_by_id(task_id)
-    if task:
-        runner = AegisWorkflowRunner()
-        await runner.execute_task_workflow(task)
+    from services.api.routes.tasks import _run_workflow_background
+    await _run_workflow_background(task_id)
 
 
 class ApprovalResponse(BaseModel):

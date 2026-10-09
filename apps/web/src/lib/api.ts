@@ -122,7 +122,12 @@ export function clearToken() {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+  retries?: number;
+}
+
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const token = getToken();
   const apiBase = getApiBaseUrl();
   const headers: Record<string, string> = {
@@ -135,97 +140,165 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   const method = (options.method || "GET").toUpperCase();
+  const isAuthEndpoint = endpoint.startsWith("/api/auth/");
+  const isSyncOrExecute = endpoint.includes("/sync") || endpoint.includes("/execute");
 
-  // Create an automatic 6-second timeout signal for all requests so UI never hangs indefinitely
-  let timeoutSignal: AbortSignal | undefined;
-  if (!options.signal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+  // Cloud/Render-aware timeout:
+  // Render free tier spins down on inactivity and requires ~30-50s to wake up.
+  // Auth endpoints and heavy actions get 75s; standard requests get 45s.
+  const effectiveTimeoutMs =
+    options.timeoutMs ??
+    (isAuthEndpoint ? 75000 : isSyncOrExecute ? 60000 : 45000);
+
+  const maxRetries = options.retries ?? (isAuthEndpoint ? 1 : 0);
+
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let timeoutSignal: AbortSignal | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortController: AbortController | undefined;
+
+    if (!options.signal) {
+      if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+        try {
+          timeoutSignal = AbortSignal.timeout(effectiveTimeoutMs);
+        } catch { }
+      }
+      if (!timeoutSignal && typeof AbortController !== "undefined") {
+        abortController = new AbortController();
+        timeoutSignal = abortController.signal;
+        fallbackTimer = setTimeout(() => {
+          abortController?.abort(new DOMException("Request timed out", "TimeoutError"));
+        }, effectiveTimeoutMs);
+      }
+    }
+
     try {
-      timeoutSignal = AbortSignal.timeout(6000);
-    } catch { }
-  }
+      const res = await fetch(`${apiBase}${endpoint}`, {
+        ...options,
+        signal: options.signal || timeoutSignal,
+        headers,
+      });
 
-  try {
-    const res = await fetch(`${apiBase}${endpoint}`, {
-      ...options,
-      signal: options.signal || timeoutSignal,
-      headers,
-    });
+      if (fallbackTimer) clearTimeout(fallbackTimer);
 
-    if (!res.ok) {
-      let errMsg = `Request failed: ${res.status} ${res.statusText}`;
-      try {
-        const errJson = await res.json();
-        errMsg = errJson.message || errJson.detail || errMsg;
-      } catch (_) { }
+      if (!res.ok) {
+        // If server is returning 502/503 during cold container boot and we have retries left, wait and retry
+        if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
 
-      if (res.status === 401) {
-        clearToken();
-        if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-          window.location.href = "/login?expired=1";
+        let errMsg = `Request failed: ${res.status} ${res.statusText}`;
+        try {
+          const errJson = await res.json();
+          errMsg = errJson.message || errJson.detail || errMsg;
+        } catch (_) { }
+
+        if (res.status === 401) {
+          clearToken();
+          if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+            window.location.href = "/login?expired=1";
+          }
+        }
+
+        throw new Error(errMsg);
+      }
+
+      const data = (await res.json()) as T;
+      // Cache successful GET queries for instant client navigation
+      if (method === "GET") {
+        setCachedApiData(endpoint, data);
+      }
+      return data;
+    } catch (err: any) {
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      lastError = err;
+
+      const isNetworkError =
+        err?.name === "TypeError" ||
+        err?.message?.toLowerCase().includes("failed to fetch") ||
+        err?.message?.toLowerCase().includes("networkerror") ||
+        err?.message?.toLowerCase().includes("network error") ||
+        err?.message?.toLowerCase().includes("load failed");
+
+      // Auto-retry once on network error if server is waking up
+      if (isNetworkError && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+
+      // If it's a GET query, check cache first
+      if (method === "GET") {
+        const cached = getCachedApiData<T>(endpoint);
+        if (cached !== null) {
+          return cached;
+        }
+
+        // Safe fallback for query endpoints so UI never freezes or displays infinite skeletons
+        if (
+          endpoint.includes("/approvals") ||
+          endpoint.includes("/tasks") ||
+          endpoint.includes("/repositories") ||
+          endpoint.includes("/pull-requests") ||
+          endpoint.includes("/agents") ||
+          endpoint.includes("/cards") ||
+          endpoint.includes("/activity") ||
+          endpoint.includes("/history") ||
+          endpoint.includes("/workspaces")
+        ) {
+          return [] as unknown as T;
+        }
+        if (endpoint.includes("/metrics")) {
+          return {
+            total_tasks: 0,
+            completed_tasks: 0,
+            failed_tasks: 0,
+            active_tasks: 0,
+            success_rate: 0,
+            average_duration_seconds: 0,
+            average_repair_loops: 1.0,
+            bounded_retry_limit: 3,
+            tokens_consumed: 12450,
+            estimated_cost_usd: 0.04,
+            user_billed_usd: 0.0,
+            billing_tier: "Free Community Tier",
+            data_available: false,
+          } as unknown as T;
+        }
+        if (endpoint.includes("/me")) {
+          const cachedUser = getCachedUser();
+          return cachedUser as unknown as T;
+        }
+        if (endpoint.includes("/status")) {
+          return { app_configured: false, connected: false, installations: [], repository_count: 0 } as unknown as T;
         }
       }
 
-      throw new Error(errMsg);
-    }
+      // Translate cryptic browser signals into user-friendly error messages
+      const isTimeout =
+        err?.name === "TimeoutError" ||
+        err?.name === "AbortError" ||
+        err?.message?.toLowerCase().includes("timed out") ||
+        err?.message?.toLowerCase().includes("signal timed out") ||
+        err?.message?.toLowerCase().includes("abort");
 
-    const data = (await res.json()) as T;
-    // Cache successful GET queries for instant client navigation
-    if (method === "GET") {
-      setCachedApiData(endpoint, data);
-    }
-    return data;
-  } catch (err: any) {
-    // If it's a GET query, check cache first
-    if (method === "GET") {
-      const cached = getCachedApiData<T>(endpoint);
-      if (cached !== null) {
-        return cached;
+      let formattedMessage = err?.message || "An unexpected error occurred.";
+      if (isTimeout) {
+        formattedMessage =
+          "The backend server is taking longer than usual to respond. It may be waking up from sleep (cold start). Please try again in a moment.";
+      } else if (isNetworkError) {
+        formattedMessage =
+          "Cannot reach the backend server. The service may be starting up. Please check your connection or try again shortly.";
       }
 
-      // Safe fallback for query endpoints so UI never freezes or displays infinite skeletons
-      if (
-        endpoint.includes("/approvals") ||
-        endpoint.includes("/tasks") ||
-        endpoint.includes("/repositories") ||
-        endpoint.includes("/pull-requests") ||
-        endpoint.includes("/agents") ||
-        endpoint.includes("/cards") ||
-        endpoint.includes("/activity") ||
-        endpoint.includes("/history") ||
-        endpoint.includes("/workspaces")
-      ) {
-        return [] as unknown as T;
-      }
-      if (endpoint.includes("/metrics")) {
-        return {
-          total_tasks: 0,
-          completed_tasks: 0,
-          failed_tasks: 0,
-          active_tasks: 0,
-          success_rate: 0,
-          average_duration_seconds: 0,
-          average_repair_loops: 1.0,
-          bounded_retry_limit: 3,
-          tokens_consumed: 12450,
-          estimated_cost_usd: 0.04,
-          user_billed_usd: 0.0,
-          billing_tier: "Free Community Tier",
-          data_available: false,
-        } as unknown as T;
-      }
-      if (endpoint.includes("/me")) {
-        const cachedUser = getCachedUser();
-        return cachedUser as unknown as T;
-      }
-      if (endpoint.includes("/status")) {
-        return { app_configured: false, connected: false, installations: [], repository_count: 0 } as unknown as T;
-      }
+      console.warn(`[AegisCode API] Request error at ${apiBase}${endpoint}:`, formattedMessage);
+      throw new Error(formattedMessage);
     }
-
-    // For write mutations, bubble the error with a friendly message
-    console.warn(`[AegisCode API] Request error at ${apiBase}${endpoint}:`, err?.message || err);
-    throw err;
   }
+
+  throw lastError || new Error("Request failed after retry attempts.");
 }
 
 export const api = {
@@ -234,6 +307,8 @@ export const api = {
       const res = await request<{ access_token: string; username: string; email: string; full_name?: string; avatar_url?: string; organization_name?: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ username_or_email, password }),
+        timeoutMs: 75000,
+        retries: 1,
       });
       setToken(res.access_token);
       setCachedUser({
@@ -249,6 +324,8 @@ export const api = {
       const res = await request<{ access_token: string; username: string; email: string; full_name?: string; avatar_url?: string; organization_name?: string }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({ email, username, password, full_name }),
+        timeoutMs: 75000,
+        retries: 1,
       });
       setToken(res.access_token);
       setCachedUser({
@@ -264,6 +341,8 @@ export const api = {
       const res = await request<{ access_token: string; username: string; email: string; full_name?: string; avatar_url?: string; organization_name?: string }>("/api/auth/google", {
         method: "POST",
         body: JSON.stringify(data),
+        timeoutMs: 75000,
+        retries: 1,
       });
       setToken(res.access_token);
       // Prefer the picture provided by the caller (freshest from Google OAuth) over stored avatar

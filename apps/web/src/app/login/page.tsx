@@ -11,9 +11,15 @@ import { api, setToken, getToken, setCachedUser, getApiBaseUrl } from "@/lib/api
 async function checkBackend(): Promise<boolean> {
   try {
     const cleanUrl = getApiBaseUrl();
+    let signal: AbortSignal | undefined;
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      try {
+        signal = AbortSignal.timeout(25000);
+      } catch { }
+    }
     const res = await fetch(`${cleanUrl}/health`, {
       method: "GET",
-      signal: AbortSignal.timeout(10000),
+      signal,
     });
     return res.ok;
   } catch {
@@ -37,6 +43,7 @@ function LoginForm() {
   const [error, setError] = useState(isExpired ? "Your session has expired. Please sign in again." : "");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
@@ -53,7 +60,7 @@ function LoginForm() {
     checkBackend().then(setBackendOnline);
     const interval = setInterval(() => {
       checkBackend().then(setBackendOnline);
-    }, 8000);
+    }, 12000);
     return () => clearInterval(interval);
   }, []);
 
@@ -81,9 +88,13 @@ function LoginForm() {
 
           try {
             /* Fetch user info from Google */
+            let googleSignal: AbortSignal | undefined;
+            if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+              try { googleSignal = AbortSignal.timeout(20000); } catch { }
+            }
             const uRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
               headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-              signal: AbortSignal.timeout(10000),
+              signal: googleSignal,
             });
             if (!uRes.ok) throw new Error("Could not retrieve your Google account info.");
             const userInfo = await uRes.json();
@@ -112,12 +123,18 @@ function LoginForm() {
             setSuccessMsg(`Welcome, ${res.full_name || res.email}! Redirecting…`);
             setTimeout(() => router.replace(redirectUrl), 800);
           } catch (err: any) {
-            const msg = err?.message || "Google authentication failed.";
-            setError(
-              msg.includes("fetch") || msg.includes("connect")
-                ? "Cannot reach the AegisCode backend. Please ensure it is running on port 8000."
-                : msg
-            );
+            const raw = err?.message || "";
+            let msg = raw;
+            if (
+              raw.toLowerCase().includes("timed out") ||
+              raw.toLowerCase().includes("signal") ||
+              raw.toLowerCase().includes("abort")
+            ) {
+              msg = "Server took too long to respond while waking up. Please try Google Sign-In again.";
+            } else if (raw.toLowerCase().includes("fetch") || raw.toLowerCase().includes("connect") || raw.toLowerCase().includes("network")) {
+              msg = "Cannot reach the AegisCode backend. The service may be waking up on Render. Please try again in a few moments.";
+            }
+            setError(msg);
           } finally {
             setGoogleLoading(false);
           }
@@ -173,9 +190,16 @@ function LoginForm() {
     setError("");
 
     setLoading(true);
+    setLoadingStatus(isRegister ? "Creating account…" : "Signing in…");
+
+    // If server takes longer than 2.5s (e.g. cold start on Render), reassure user
+    const wakeUpTimer = setTimeout(() => {
+      setLoadingStatus("Waking up server (Render cold start, ~25-45s)…");
+    }, 2500);
+
     try {
       if (isRegister) {
-        if (!username.trim()) { setError("Username is required."); setLoading(false); return; }
+        if (!username.trim()) { setError("Username is required."); setLoading(false); clearTimeout(wakeUpTimer); return; }
         const res = await api.auth.register(email, username.trim(), password, fullName || username);
         setToken(res.access_token);
         setCachedUser({
@@ -201,9 +225,24 @@ function LoginForm() {
       setSuccessMsg("Signing you in…");
       router.replace(redirectUrl);
     } catch (err: any) {
-      setError(err.message || "Invalid credentials. Please check your email/password.");
+      const raw = err?.message || "";
+      let friendly = raw;
+      if (
+        raw.toLowerCase().includes("timed out") ||
+        raw.toLowerCase().includes("signal") ||
+        raw.toLowerCase().includes("abort")
+      ) {
+        friendly = "The backend server took too long to wake up. Please click Sign In again to retry.";
+      } else if (raw.toLowerCase().includes("failed to fetch") || raw.toLowerCase().includes("network")) {
+        friendly = "Cannot connect to the server. It may still be starting up. Please try again shortly.";
+      } else if (!raw) {
+        friendly = "Invalid credentials. Please check your email/password.";
+      }
+      setError(friendly);
     } finally {
+      clearTimeout(wakeUpTimer);
       setLoading(false);
+      setLoadingStatus("");
     }
   };
 
@@ -254,7 +293,7 @@ function LoginForm() {
             <AlertTriangle className="h-4 w-4 text-accent-amber shrink-0 mt-0.5" />
             <div className="text-xs text-amber-300">
               <p className="font-semibold">Backend server warming up</p>
-              <p className="mt-0.5 opacity-80">Render free tier instances sleep after inactivity and take ~30-50s to wake up on first load.</p>
+              <p className="mt-0.5 opacity-80">Render free tier instances sleep after inactivity and take ~25-45s to wake up. Submitting sign-in will wake the server automatically.</p>
             </div>
           </div>
         )}
@@ -352,11 +391,11 @@ function LoginForm() {
           <button
             id="submit-btn"
             type="submit"
-            disabled={loading || backendOnline === false}
+            disabled={loading}
             className="w-full mt-2 flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 py-3 text-sm font-bold text-white transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /><span>Processing…</span></>
+              <><Loader2 className="h-4 w-4 animate-spin shrink-0" /><span>{loadingStatus || "Processing…"}</span></>
             ) : (
               <><span>{isRegister ? "Create Account" : "Sign In"}</span><ArrowRight className="h-4 w-4" /></>
             )}
@@ -377,7 +416,7 @@ function LoginForm() {
               id="google-signin-btn"
               type="button"
               onClick={handleContinueWithGoogle}
-              disabled={googleLoading || backendOnline === false}
+              disabled={googleLoading}
               className="w-full flex items-center justify-center gap-3 rounded-lg bg-white hover:bg-slate-100 py-3 px-4 text-sm font-semibold text-slate-900 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed group"
             >
               {googleLoading ? (

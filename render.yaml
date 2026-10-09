@@ -69,7 +69,7 @@ services:
       - key: SANDBOX_TIMEOUT_SECONDS
         value: "300"
       - key: SANDBOX_ALLOW_INTERNET
-        value: "false"
+        value: "true"
       # GitHub App
       - key: GITHUB_APP_ID
         sync: false
@@ -142,7 +142,7 @@ services:
       - key: SANDBOX_TIMEOUT_SECONDS
         value: "300"
       - key: SANDBOX_ALLOW_INTERNET
-        value: "false"
+        value: "true"
       - key: GITHUB_APP_ID
         sync: false
       - key: GITHUB_APP_SLUG

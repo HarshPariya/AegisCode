@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     SANDBOX_TIMEOUT_SECONDS: int = 300
     SANDBOX_MAX_MEMORY_MB: int = 2048
     SANDBOX_MAX_CPU_CORES: int = 2
-    SANDBOX_ALLOW_INTERNET: bool = False  # Allow internet access inside E2B sandbox (for pip install during tests)
+    SANDBOX_ALLOW_INTERNET: bool = True  # Allow internet access inside E2B sandbox (for git clone/push and package install during tests)
 
     # E2B Cloud Sandbox (https://e2b.dev)
     E2B_API_KEY: Optional[str] = None

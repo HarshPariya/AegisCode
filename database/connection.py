@@ -63,6 +63,12 @@ async def init_database() -> None:
     _db = _client[db_name]
     _client_loop = current_loop
 
+    # Non-blocking warm-up ping so the first HTTP request doesn't pay TLS handshake cost
+    try:
+        await asyncio.wait_for(_db.command("ping"), timeout=3.0)
+    except Exception:
+        pass
+
 
 async def close_database() -> None:
     global _client, _db, _client_loop

@@ -45,6 +45,247 @@ class AegisWorkflowRunner:
         self.sandbox = get_sandbox_provider()
         self.github = GitHubAppClient()
 
+    async def _sync_repo_files_via_github_api(
+        self, workspace_id: str, repo_slug: str, token: str, branch: str = "main"
+    ) -> bool:
+        """Download and unpack repository files into sandbox using GitHub API zipball."""
+        try:
+            import httpx
+            import io
+            import zipfile
+
+            transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "AegisCode-App",
+            }
+            async with httpx.AsyncClient(transport=transport, timeout=45.0, follow_redirects=True) as client:
+                resp = await client.get(f"https://api.github.com/repos/{repo_slug}/zipball/{branch}", headers=headers)
+                if resp.status_code != 200:
+                    resp = await client.get(f"https://api.github.com/repos/{repo_slug}/zipball", headers=headers)
+                if resp.status_code != 200:
+                    logger.warning(f"Could not download zipball for {repo_slug}: HTTP {resp.status_code}")
+                    return False
+
+                with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                    files_written = 0
+                    for info in z.infolist():
+                        if info.is_dir():
+                            continue
+                        parts = info.filename.split("/", 1)
+                        if len(parts) < 2:
+                            continue
+                        rel_path = parts[1]
+                        raw_bytes = z.read(info)
+                        if len(raw_bytes) > 2 * 1024 * 1024:
+                            continue  # Skip files larger than 2MB
+                        try:
+                            content_str = raw_bytes.decode("utf-8")
+                        except UnicodeDecodeError:
+                            try:
+                                content_str = raw_bytes.decode("latin-1")
+                            except Exception:
+                                continue
+                        await self.sandbox.write_file(workspace_id, rel_path, content_str)
+                        files_written += 1
+
+                    logger.info(f"Extracted {files_written} files into workspace {workspace_id} from GitHub archive.")
+
+                await self.sandbox.execute_command(workspace_id, "git init")
+                await self.sandbox.execute_command(workspace_id, 'git config user.name "AegisCode[bot]"')
+                await self.sandbox.execute_command(workspace_id, 'git config user.email "bot@aegiscode.ai"')
+                await self.sandbox.execute_command(workspace_id, "git add -A")
+                await self.sandbox.execute_command(workspace_id, 'git commit -m "[AegisCode] Base repository snapshot"')
+                return True
+        except Exception as e:
+            logger.warning(f"Error in _sync_repo_files_via_github_api: {e}")
+            return False
+
+    async def _push_branch_via_github_api(
+        self,
+        workspace_id: str,
+        repo_slug: str,
+        token: str,
+        branch_name: str,
+        base_branch: str,
+        state: AgentTaskState,
+    ) -> bool:
+        """Push modified files directly to GitHub using the GitHub Git Database REST API.
+        
+        Operates purely over HTTPS from the backend host (independent of sandbox network/DNS),
+        reading modified files from the sandbox and publishing them directly to GitHub.
+        """
+        import httpx
+        transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "AegisCode-App",
+        }
+
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            try:
+                # 1. Resolve base commit SHA
+                base_commit_sha = None
+                base_tree_sha = None
+
+                ref_resp = await client.get(
+                    f"https://api.github.com/repos/{repo_slug}/git/ref/heads/{base_branch}",
+                    headers=headers
+                )
+                if ref_resp.status_code == 200:
+                    base_commit_sha = ref_resp.json().get("object", {}).get("sha")
+                else:
+                    repo_resp = await client.get(f"https://api.github.com/repos/{repo_slug}", headers=headers)
+                    if repo_resp.status_code == 200:
+                        default_b = repo_resp.json().get("default_branch", "main")
+                        ref_resp2 = await client.get(
+                            f"https://api.github.com/repos/{repo_slug}/git/ref/heads/{default_b}",
+                            headers=headers
+                        )
+                        if ref_resp2.status_code == 200:
+                            base_commit_sha = ref_resp2.json().get("object", {}).get("sha")
+
+                if not base_commit_sha:
+                    logger.error(f"[GitHub API Push] Could not resolve base branch '{base_branch}' commit SHA on {repo_slug}")
+                    return False
+
+                # 2. Get base tree SHA
+                commit_resp = await client.get(
+                    f"https://api.github.com/repos/{repo_slug}/git/commits/{base_commit_sha}",
+                    headers=headers
+                )
+                if commit_resp.status_code == 200:
+                    base_tree_sha = commit_resp.json().get("tree", {}).get("sha")
+                else:
+                    logger.error(f"[GitHub API Push] Could not get commit {base_commit_sha}: {commit_resp.text}")
+                    return False
+
+                # 3. Collect modified files from sandbox
+                files_to_upload: dict[str, str] = {}
+
+                if state.diff_summary and state.diff_summary.files:
+                    for f in state.diff_summary.files:
+                        if f.file_path:
+                            try:
+                                content = await self.sandbox.read_file(workspace_id, f.file_path)
+                                files_to_upload[f.file_path] = content
+                            except Exception as read_err:
+                                logger.warning(f"[GitHub API Push] Could not read {f.file_path} from sandbox: {read_err}")
+
+                try:
+                    st_res = await self.sandbox.execute_command(workspace_id, "git status --porcelain")
+                    if st_res.exit_code == 0 and st_res.stdout.strip():
+                        for line in st_res.stdout.strip().splitlines():
+                            parts = line.strip().split(maxsplit=1)
+                            if len(parts) == 2:
+                                fpath = parts[1].strip().strip('"')
+                                if fpath and fpath not in files_to_upload and not fpath.startswith(".git"):
+                                    try:
+                                        content = await self.sandbox.read_file(workspace_id, fpath)
+                                        files_to_upload[fpath] = content
+                                    except Exception:
+                                        pass
+                except Exception:
+                    pass
+
+                if not files_to_upload:
+                    try:
+                        diff_names = await self.sandbox.execute_command(workspace_id, "git diff --name-only HEAD~1 HEAD")
+                        if diff_names.exit_code == 0 and diff_names.stdout.strip():
+                            for fpath in diff_names.stdout.strip().splitlines():
+                                fpath = fpath.strip().strip('"')
+                                if fpath and not fpath.startswith(".git"):
+                                    try:
+                                        content = await self.sandbox.read_file(workspace_id, fpath)
+                                        files_to_upload[fpath] = content
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+
+                # 4. Create blobs and tree entries
+                tree_items = []
+                for fpath, fcontent in files_to_upload.items():
+                    blob_resp = await client.post(
+                        f"https://api.github.com/repos/{repo_slug}/git/blobs",
+                        headers=headers,
+                        json={"content": fcontent, "encoding": "utf-8"}
+                    )
+                    if blob_resp.status_code in (200, 201):
+                        blob_sha = blob_resp.json().get("sha")
+                        tree_items.append({
+                            "path": fpath.replace("\\", "/").lstrip("/"),
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": blob_sha
+                        })
+                    else:
+                        logger.warning(f"[GitHub API Push] Blob creation failed for {fpath}: {blob_resp.text}")
+
+                # 5. Create new tree
+                tree_payload = {"tree": tree_items}
+                if base_tree_sha:
+                    tree_payload["base_tree"] = base_tree_sha
+
+                tree_resp = await client.post(
+                    f"https://api.github.com/repos/{repo_slug}/git/trees",
+                    headers=headers,
+                    json=tree_payload
+                )
+                if tree_resp.status_code not in (200, 201):
+                    logger.error(f"[GitHub API Push] Tree creation failed: {tree_resp.text}")
+                    return False
+                new_tree_sha = tree_resp.json().get("sha")
+
+                # 6. Create commit
+                commit_payload = {
+                    "message": f"[AegisCode] {state.title}",
+                    "tree": new_tree_sha,
+                    "parents": [base_commit_sha] if base_commit_sha else []
+                }
+                new_commit_resp = await client.post(
+                    f"https://api.github.com/repos/{repo_slug}/git/commits",
+                    headers=headers,
+                    json=commit_payload
+                )
+                if new_commit_resp.status_code not in (200, 201):
+                    logger.error(f"[GitHub API Push] Commit creation failed: {new_commit_resp.text}")
+                    return False
+                new_commit_sha = new_commit_resp.json().get("sha")
+
+                # 7. Create or update branch reference
+                ref_check = await client.get(
+                    f"https://api.github.com/repos/{repo_slug}/git/ref/heads/{branch_name}",
+                    headers=headers
+                )
+                if ref_check.status_code == 200:
+                    update_resp = await client.patch(
+                        f"https://api.github.com/repos/{repo_slug}/git/refs/heads/{branch_name}",
+                        headers=headers,
+                        json={"sha": new_commit_sha, "force": True}
+                    )
+                    success = update_resp.status_code == 200
+                else:
+                    create_resp = await client.post(
+                        f"https://api.github.com/repos/{repo_slug}/git/refs",
+                        headers=headers,
+                        json={"ref": f"refs/heads/{branch_name}", "sha": new_commit_sha}
+                    )
+                    success = create_resp.status_code in (200, 201)
+
+                if success:
+                    logger.info(f"[GitHub API Push] Successfully created/updated branch {branch_name} on {repo_slug} at commit {new_commit_sha}")
+                    return True
+                else:
+                    logger.error(f"[GitHub API Push] Could not create/update branch ref for {branch_name}")
+                    return False
+
+            except Exception as e:
+                logger.error(f"[GitHub API Push] Exception during direct API push: {e}", exc_info=True)
+                return False
+
     async def execute_task_workflow(self, task: Task) -> AgentTaskState:
         """Execute the multi-agent engineering lifecycle."""
         logger.info(f"Starting workflow execution for task: {task.id} - '{task.title}'")
@@ -144,10 +385,13 @@ class AegisWorkflowRunner:
 
                         repo_slug = target_repo.full_name if "/" in target_repo.full_name else f"{getattr(gh_install, 'account_login', 'repo')}/{target_repo.name}"
 
+                        token_for_clone = None
                         if gh_install and getattr(gh_install, "auth_type", "app") == "pat" and gh_install.access_token:
+                            token_for_clone = gh_install.access_token
                             auth_clone_url = f"https://x-access-token:{gh_install.access_token}@github.com/{repo_slug}.git"
                         elif self.github.is_configured and getattr(target_repo, "github_installation_id", None):
                             token = await self.github.get_installation_token(target_repo.github_installation_id)
+                            token_for_clone = token
                             auth_clone_url = f"https://x-access-token:{token}@github.com/{repo_slug}.git"
                         elif target_repo.clone_url:
                             auth_clone_url = target_repo.clone_url
@@ -166,9 +410,16 @@ class AegisWorkflowRunner:
                                     f"git clone --depth 1 {auth_clone_url} ."
                                 )
                                 if clone_res2.exit_code != 0:
-                                    logger.info(f"Cloning failed or repo empty. Initializing git workspace for {repo_slug}...")
-                                    await self.sandbox.execute_command(workspace_id, "git init")
-                                    await self.sandbox.execute_command(workspace_id, f"git remote add origin {auth_clone_url}")
+                                    logger.info(f"Cloning failed or repo empty. Attempting direct GitHub archive sync for {repo_slug}...")
+                                    synced = False
+                                    if token_for_clone:
+                                        synced = await self._sync_repo_files_via_github_api(
+                                            workspace_id, repo_slug, token_for_clone, branch_to_clone
+                                        )
+                                    if not synced:
+                                        logger.info(f"Direct sync failed or no token. Initializing git workspace for {repo_slug}...")
+                                        await self.sandbox.execute_command(workspace_id, "git init")
+                                        await self.sandbox.execute_command(workspace_id, f"git remote add origin {auth_clone_url}")
                     except Exception as clone_err:
                         logger.error(f"Failed to clone repository {getattr(target_repo, 'full_name', 'unknown')}: {clone_err}")
 
@@ -529,18 +780,34 @@ class AegisWorkflowRunner:
                         )
                     if push_res.exit_code != 0:
                         raw_err = (push_res.stderr.strip() or push_res.stdout.strip() or "remote rejected")
-                        err_msg = (
-                            f"GitHub push failed: {raw_err}. "
-                            f"Please ensure your Personal Access Token (PAT) has 'repo' (full control) write permissions for '{repo_slug}'."
+                        logger.warning(
+                            f"git push inside sandbox failed ({raw_err}). Attempting resilient GitHub Git Database REST API direct push..."
                         )
-                        logger.error(err_msg)
-                        state.status = TaskStatus.FAILED
-                        state.error = err_msg
-                        await self.state_mgr.transition_to(
-                            task, TaskStatus.FAILED, actor="github",
-                            metadata={"error": err_msg, "message": err_msg}
+                        token_for_push = gh_install.access_token if (is_pat and gh_install) else token
+                        base_branch = task.branch or target_repo.default_branch or "main"
+                        api_push_success = await self._push_branch_via_github_api(
+                            workspace_id=workspace_id,
+                            repo_slug=repo_slug,
+                            token=token_for_push,
+                            branch_name=state.working_branch,
+                            base_branch=base_branch,
+                            state=state,
                         )
-                        return state
+                        if not api_push_success:
+                            err_msg = (
+                                f"GitHub push failed: {raw_err}. "
+                                f"Please ensure your Personal Access Token (PAT) has 'repo' (full control) write permissions for '{repo_slug}'."
+                            )
+                            logger.error(err_msg)
+                            state.status = TaskStatus.FAILED
+                            state.error = err_msg
+                            await self.state_mgr.transition_to(
+                                task, TaskStatus.FAILED, actor="github",
+                                metadata={"error": err_msg, "message": err_msg}
+                            )
+                            return state
+                        else:
+                            logger.info(f"Resilient GitHub API direct push succeeded for branch {state.working_branch}!")
 
                     # 4. Create Pull Request on GitHub
                     base_branch = task.branch or target_repo.default_branch or "main"
